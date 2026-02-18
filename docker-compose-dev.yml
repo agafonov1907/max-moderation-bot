@@ -1,0 +1,40 @@
+services:
+  vk-max-moderation-bot-dev:
+    container_name: vk-max-moderation-bot-dev
+    image: ${BACKEND_IMAGE}:${BACKEND_DEV_TAG}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090"
+    env_file:
+      - ./dev.env
+    depends_on:
+      vk-max-moderation-bot-dev-db:
+        condition: service_healthy
+    networks:
+      - vk-max-moderation-bot-dev
+
+  vk-max-moderation-bot-dev-db:
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_USER=maxbot
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_DB=maxbot_db
+    volumes:
+      - pg_data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - vk-max-moderation-bot-dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maxbot -d maxbot_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  vk-max-moderation-bot-dev:
+    name: vk-max-moderation-bot-dev
+    driver: bridge
+
+volumes:
+  pg_data:

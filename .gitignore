@@ -1,0 +1,39 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Build artifacts
+/bot
+/bin/
+/build/
+*.log
+
+# Go
+go.work
+go.work.sum
+vendor/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.bingo
+.agent
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+logs/
+*.log
+tmp/

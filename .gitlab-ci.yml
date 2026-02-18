@@ -1,0 +1,184 @@
+image: docker:27
+
+
+include:
+  - component: $CI_SERVER_FQDN/rc-foundation/devops/ci-cd-components/security@1.0.18
+
+
+stages:
+  - test
+  - pre-build-scan
+  - build
+  - post-build-scan
+  - deploy
+
+
+Hadolint:
+  extends: .Hadolint_template
+  variables:
+    DOCKERFILE_PATH: ./Dockerfile
+
+
+Bearer:
+  extends: .Bearer_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Semgrep_scan:
+  extends: .Semgrep_scan_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Semgrep_ci:
+  extends: .Semgrep_ci_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Gitleaks_dir:
+  extends: .Gitleaks_dir_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Gitleaks_git:
+  extends: .Gitleaks_git_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Trivy_filesystem:
+  extends: .Trivy_filesystem_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+
+
+Build-dev:
+  stage: build
+  resource_group: build-dev
+  variables:
+    IMAGE_NAME: "dev"
+  rules:
+    - if: |
+        $CI_COMMIT_BRANCH == "main" ||
+        $CI_COMMIT_BRANCH == "dev"
+      when: always
+  #when: manual
+  script:
+    - echo "----- START BUILD -----"
+    - docker login "$CI_REGISTRY_IMAGE" --username "$CI_REGISTRY_USER" --password "$CI_REGISTRY_PASSWORD"
+    - echo "$CI_REGISTRY_IMAGE"/"$IMAGE_NAME":"$CI_PIPELINE_IID"
+    - docker build -t "$CI_REGISTRY_IMAGE"/"$IMAGE_NAME":"$CI_PIPELINE_IID" .
+    - docker tag "$CI_REGISTRY_IMAGE"/"$IMAGE_NAME":"$CI_PIPELINE_IID" "$CI_REGISTRY_IMAGE"/"$IMAGE_NAME":latest
+    - docker push --all-tags "$CI_REGISTRY_IMAGE"/"$IMAGE_NAME"
+    - echo "----- BUILD DONE -----"
+
+
+Dockle-dev:
+  extends: .Dockle_template
+  variables:
+    DOCKLE_SCAN_IMAGE: "$CI_REGISTRY_IMAGE/dev:$CI_PIPELINE_IID"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: always
+  dependencies:
+    - Build-dev
+
+
+Trivy-dev:
+  extends: .Trivy_image_template
+  variables:
+    DOCKERFILE_PATH: ./Dockerfile
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+    TRIVY_SCAN_IMAGE: "$CI_REGISTRY_IMAGE/dev:$CI_PIPELINE_IID"
+  dependencies:
+    - Build-dev
+
+
+Grype-dev:
+  extends: .Grype_template
+  variables:
+    ARTIFACT_PATH: $CI_PROJECT_DIR/$CI_PROJECT_NAME-$CI_PIPELINE_IID
+    GRYPE_SCAN_IMAGE: "$CI_REGISTRY_IMAGE/dev:$CI_PIPELINE_IID"
+  dependencies:
+    - Build-dev
+
+
+Deploy-dev:
+  stage: deploy
+  resource_group: deploy-dev
+  rules:
+    - if:
+        $CI_COMMIT_BRANCH == "dev"
+      when: always
+  variables:
+    IMAGE_NAME: "dev"
+  before_script:
+    - 'command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$PLESK_SSH" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+  script:
+    - echo "Deploying application..."
+    - echo "Application successfully deployed."
+    - echo "Host *" > ~/.ssh/config
+    - echo "    StrictHostKeyChecking no" >> ~/.ssh/config
+    - cat ~/.ssh/config
+    - scp "$env_moderation_dev" root@$DEV_IP:~/vk-max-moderation-bot/dev.env
+    - scp docker-compose-dev.yml root@$DEV_IP:~/vk-max-moderation-bot/docker-compose-dev.yml
+    - |
+      ssh root@$DEV_IP "
+        cd ~/vk-max-moderation-bot/ && pwd &&
+        docker login $CI_REGISTRY &&
+        export BACKEND_DEV_TAG=$CI_PIPELINE_IID &&
+        export BACKEND_IMAGE=$CI_REGISTRY_IMAGE/$IMAGE_NAME &&
+        docker compose -f docker-compose-dev.yml pull &&
+        docker compose -f docker-compose-dev.yml up -d --force-recreate
+      sleep 15
+      docker compose -f docker-compose-dev.yml logs
+      "
+    - echo "Success"
+  dependencies:
+    - Build-dev
+
+
+Deploy-demo:
+  stage: deploy
+  resource_group: deploy-demo
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  #when: manual
+  variables:
+    IMAGE_NAME: "dev"
+  before_script:
+    - 'command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$PLESK_SSH" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+  script:
+    - echo "Deploying application..."
+    - echo "Application successfully deployed."
+    - echo "Host *" > ~/.ssh/config
+    - echo "    StrictHostKeyChecking no" >> ~/.ssh/config
+    - cat ~/.ssh/config
+    - scp "$env_moderation_demo" root@$DEV_IP:~/vk-max-moderation-bot-demo/demo.env
+    - scp docker-compose-demo.yml root@$DEV_IP:~/vk-max-moderation-bot-demo/docker-compose-demo.yml
+    - |
+      ssh root@$DEV_IP "
+        cd ~/vk-max-moderation-bot-demo/ && pwd &&
+        docker login $CI_REGISTRY &&
+        export BACKEND_DEV_TAG=$CI_PIPELINE_IID &&
+        export BACKEND_IMAGE=$CI_REGISTRY_IMAGE/$IMAGE_NAME &&
+        docker compose -f docker-compose-demo.yml pull &&
+        docker compose -f docker-compose-demo.yml up -d --force-recreate
+      sleep 15
+      docker compose -f docker-compose-demo.yml logs
+      "
+    - echo "Success"
+  dependencies:
+    - Build-dev
+

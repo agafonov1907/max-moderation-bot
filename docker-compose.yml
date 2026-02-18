@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_USER=maxbot
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_DB=maxbot_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql
+
+volumes:
+  pg_data:

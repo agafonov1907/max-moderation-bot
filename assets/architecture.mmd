@@ -1,0 +1,67 @@
+graph LR
+    subgraph Client [Клиенты]
+        direction TB
+        User((Пользователь))
+        Admin((Админ))
+    end
+
+    subgraph Bot [Max Moderation Bot]
+        direction LR
+        
+        subgraph Transport [Транспорт]
+            direction TB
+            API[API Клиент]
+            Poller[Long Polling]
+            Hook[Webhook]
+        end
+
+        subgraph Core [Ядро / Логика]
+            direction TB
+            Handler[Обработчик]
+            
+            subgraph Pipe [Pipeline]
+                direction TB
+                F4[1. Мут] --> F2[2. Ссылки]
+                F2 --> F1[3. Слова]
+                F1 --> F3[4. Вложения]
+            end
+
+            Service[Сервис]
+        end
+
+        subgraph Data [Хранение]
+            direction TB
+            Repo["Основной Репо"]
+            TempRepo["Врем. Сообщения"]
+        end
+    end
+
+    subgraph External [Внешние]
+        direction TB
+        DB[(PostgreSQL)]
+        Prometheus[Prometheus]
+    end
+
+    %% Flows
+    User -->|Msg| Hook
+    User -->|Msg| Poller
+    Admin -->|Cmd| API
+
+    Hook --> Handler
+    Poller --> Handler
+    
+    Handler --> F4
+    F3 --> Service
+    Handler --> Service
+
+    Service --> Repo
+    Service --> TempRepo
+
+    Repo --> DB
+    TempRepo --> DB
+
+    %% Background
+    Cleanup(Автоочистка) -.-> TempRepo
+    Metrics(Сборщик) -.-> Repo
+    
+    API -.-> Prometheus

@@ -51,6 +51,12 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 		return
 	}
 
+	// Обработка команды /broadcast
+	if strings.HasPrefix(upd.GetCommand(), "/broadcast") {
+	h.handleBroadcast(ctx, upd)
+	return
+	}
+
 	if strings.HasPrefix(text, "/start") || strings.HasPrefix(text, "/menu") {
 		h.sendMainMenu(ctx, upd.Message.Sender.UserId)
 	}
@@ -281,4 +287,144 @@ func parseWordsFile(scanner *bufio.Scanner) ([]string, int, error) {
 		return nil, 0, err
 	}
 	return words, skippedCount, nil
+}
+func (h *Handler) handleBroadcast(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
+	userID := upd.Message.Sender.UserId
+
+	// Получаем исходный текст
+	text := strings.TrimSpace(upd.Message.Body.Text)
+
+	// Убираем "/broadcast"
+	var payload string
+	if strings.HasPrefix(text, "/broadcast ") {
+		payload = strings.TrimPrefix(text, "/broadcast ")
+	} else {
+		payload = ""
+	}
+
+	// Разделяем на части: первая — список chat_id, остальное — текст
+	parts := strings.SplitN(payload, " ", 2)
+	var chatIDStr string
+	var broadcastText string
+
+	if len(parts) == 2 {
+		chatIDStr = parts[0]
+		broadcastText = parts[1]
+	} else if len(parts) == 1 && parts[0] != "" {
+		// Только chat_id без текста
+		chatIDStr = parts[0]
+		broadcastText = ""
+	} else {
+		// Нет chat_id — отправляем во все чаты
+		chatIDStr = ""
+		broadcastText = payload
+	}
+
+	// Получаем список всех чатов пользователя
+	allManagedChats, err := h.svc.GetManagedChats(ctx, userID)
+	if err != nil {
+		h.logger.Error("Failed to get managed chats", "error", err)
+		h.sendText(ctx, userID, "❌ Ошибка при получении списка чатов.")
+		return
+	}
+
+	if len(allManagedChats) == 0 {
+		h.sendText(ctx, userID, "У вас нет привязанных чатов.")
+		return
+	}
+
+	// Определяем целевые чаты
+	var targetChatIDs []int64
+
+	if chatIDStr == "" {
+		// Отправка во все чаты
+		targetChatIDs = allManagedChats
+	} else {
+		// Парсим список chat_id (через запятую)
+		idList := strings.Split(chatIDStr, ",")
+		for _, idStr := range idList {
+			idStr = strings.TrimSpace(idStr)
+			if idStr == "" {
+				continue
+			}
+			var chatID int64
+			if _, err := fmt.Sscanf(idStr, "%d", &chatID); err != nil {
+				h.sendText(ctx, userID, fmt.Sprintf("❌ Неверный формат ID чата: %s", idStr))
+				return
+			}
+
+			// Проверяем, есть ли доступ к этому чату
+			hasAccess := false
+			for _, id := range allManagedChats {
+				if id == chatID {
+					hasAccess = true
+					break
+				}
+			}
+			if !hasAccess {
+				h.sendText(ctx, userID, fmt.Sprintf("❌ У вас нет доступа к чату %d", chatID))
+				return
+			}
+			targetChatIDs = append(targetChatIDs, chatID)
+		}
+	}
+
+	// Отправка сообщения
+	for _, chatID := range targetChatIDs {
+		msg := maxbot.NewMessage()
+		msg.SetChat(chatID)
+		msg.SetText(broadcastText)
+		msg.SetFormat("markdown")
+
+		// Обработка вложений
+		for _, raw := range upd.Message.Body.RawAttachments {
+			var attMap map[string]interface{}
+			if err := json.Unmarshal(raw, &attMap); err != nil {
+				continue
+			}
+
+			if typeVal, ok := attMap["type"].(string); ok {
+				switch typeVal {
+				case "image":
+					if payload, ok := attMap["payload"].(map[string]interface{}); ok {
+						if token, ok := payload["token"].(string); ok && token != "" {
+							msg.AddPhoto(&schemes.PhotoTokens{
+								Photos: map[string]schemes.PhotoToken{
+									"full": {Token: token},
+								},
+							})
+						}
+					}
+				case "file":
+					if payload, ok := attMap["payload"].(map[string]interface{}); ok {
+						if token, ok := payload["token"].(string); ok && token != "" {
+							msg.AddFile(&schemes.UploadedInfo{Token: token})
+						}
+					}
+				case "video":
+					if payload, ok := attMap["payload"].(map[string]interface{}); ok {
+						if token, ok := payload["token"].(string); ok && token != "" {
+							msg.AddVideo(&schemes.UploadedInfo{Token: token})
+						}
+					}
+				case "audio":
+					if payload, ok := attMap["payload"].(map[string]interface{}); ok {
+						if token, ok := payload["token"].(string); ok && token != "" {
+							msg.AddAudio(&schemes.UploadedInfo{Token: token})
+						}
+					}
+				}
+			}
+		}
+
+		if _, err := h.bot.Messages.SendWithResult(ctx, msg); err != nil {
+			h.logger.Warn("Failed to send broadcast to chat", "chat_id", chatID, "error", err)
+		}
+	}
+
+	if len(targetChatIDs) == 1 {
+		h.sendText(ctx, userID, fmt.Sprintf("✅ Рассылка отправлена в чат %d", targetChatIDs[0]))
+	} else {
+		h.sendText(ctx, userID, fmt.Sprintf("✅ Рассылка отправлена в %d чат(ов)", len(targetChatIDs)))
+	}
 }

@@ -19,6 +19,20 @@ import (
 )
 
 func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
+	// === ПРОВЕРКА НА АДМИНИСТРАТОРА ===
+	isAdmin := false
+	for _, adminID := range h.config.AdminUserIDs {
+		if adminID == upd.Message.Sender.UserId {
+			isAdmin = true
+			break
+		}
+	}
+	if !isAdmin {
+		h.logger.Warn("Non-admin user access denied", "user_id", upd.Message.Sender.UserId)
+		return // Игнорируем всех неадминов
+	}
+	// ===================================
+
 	var attachmentTypes []string
 	if len(upd.Message.Body.RawAttachments) > 0 {
 		for _, raw := range upd.Message.Body.RawAttachments {
@@ -53,8 +67,8 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 
 	// Обработка команды /broadcast
 	if strings.HasPrefix(upd.GetCommand(), "/broadcast") {
-	h.handleBroadcast(ctx, upd)
-	return
+		h.handleBroadcast(ctx, upd)
+		return
 	}
 
 	if strings.HasPrefix(text, "/start") || strings.HasPrefix(text, "/menu") {
@@ -63,6 +77,20 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 }
 
 func (h *Handler) handleBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) {
+	// === ПРОВЕРКА НА АДМИНИСТРАТОРА ===
+	isAdmin := false
+	for _, adminID := range h.config.AdminUserIDs {
+		if adminID == upd.User.UserId {
+			isAdmin = true
+			break
+		}
+	}
+	if !isAdmin {
+		h.logger.Warn("Non-admin user started bot", "user_id", upd.User.UserId)
+		return
+	}
+	// ===================================
+
 	start := time.Now()
 	defer func() {
 		metrics.ObserveUpdateProcessing("bot_started", time.Since(start).Seconds(), nil)
@@ -70,6 +98,7 @@ func (h *Handler) handleBotStarted(ctx context.Context, upd *schemes.BotStartedU
 
 	h.sendMainMenu(ctx, upd.User.UserId)
 }
+
 func (h *Handler) handleUserInput(ctx context.Context, text string, userID int64, state *repository.UserState) {
 	if err := h.userStateRepo.ClearState(userID); err != nil {
 		h.logger.Error("Failed to delete user state", "error", err)
@@ -107,6 +136,7 @@ func (h *Handler) handleUserInput(ctx context.Context, text string, userID int64
 	h.sendText(ctx, userID, fmt.Sprintf(messages.MsgSettingsUpdated, msg, len(items)))
 	h.callbackHandler.HandleManageGroup(ctx, state.ChatID, userID)
 }
+
 func (h *Handler) sendText(ctx context.Context, userID int64, text string) {
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
@@ -116,6 +146,7 @@ func (h *Handler) sendText(ctx context.Context, userID int64, text string) {
 		h.logger.Error("Failed to send text message", "error", err)
 	}
 }
+
 func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
@@ -288,6 +319,7 @@ func parseWordsFile(scanner *bufio.Scanner) ([]string, int, error) {
 	}
 	return words, skippedCount, nil
 }
+
 func (h *Handler) handleBroadcast(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
 	userID := upd.Message.Sender.UserId
 

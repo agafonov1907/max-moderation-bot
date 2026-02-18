@@ -24,6 +24,7 @@ type Config struct {
 	DefaultMuteDuration    string `env:"DEFAULT_MUTE_DURATION" envDefault:"30m"`
 	EnableTelemetry        bool   `env:"ENABLE_TELEMETRY" envDefault:"true"`
 	GroupLinkedSuccessText string `env:"GROUP_LINKED_SUCCESS_TEXT" envDefault:""`
+	AdminUserIDs           []int64 `env:"ADMIN_USER_IDS" envSeparator:","`
 }
 
 func (c *Config) GetDSN() string {

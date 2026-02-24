@@ -19,6 +19,7 @@ import (
 )
 
 func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
+	
 	// === ПРОВЕРКА НА АДМИНИСТРАТОРА ===
 	isAdmin := false
 	for _, adminID := range h.config.AdminUserIDs {

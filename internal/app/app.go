@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
+	"max-moderation-bot/internal/broadcast"
 	"max-moderation-bot/internal/config"
 	"max-moderation-bot/internal/handler"
 	"max-moderation-bot/internal/metrics"
@@ -32,7 +33,6 @@ type App struct {
 }
 
 func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
-
 	bot, err := maxbot.New(cfg.BotToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot client: %w", err)
@@ -72,11 +72,36 @@ func (a *App) Run(ctx context.Context) error {
 	tempMessageRepo := repository.NewTemporaryMessageRepository(db)
 	violationRepo := repository.NewViolationRepository(db)
 
-	svc := service.NewModerationService(a.logger, settingsRepo, chatAdminRepo, linkTokenRepo, muteRepo, tempMessageRepo, violationRepo, a.bot)
+	// ✅ Создаём сервис рассылки
+	broadcastSvc := broadcast.NewService(a.logger, a.bot)
+
+	// Создаём основной сервис модерации
+	svc := service.NewModerationService(
+		a.logger,
+		settingsRepo,
+		chatAdminRepo,
+		linkTokenRepo,
+		muteRepo,
+		tempMessageRepo,
+		violationRepo,
+		a.bot,
+	)
+
+	// Запускаем фоновые задачи сервиса
 	svc.StartMetricsUpdater(ctx)
 	svc.StartCleanupTask(ctx, a.bot)
-	h := handler.NewHandler(a.logger, svc, a.bot, userStateRepo, a.cfg)
 
+	// ✅ Передаём broadcastSvc в хендлер (6-й аргумент)
+	h := handler.NewHandler(
+		a.logger,
+		svc,
+		a.bot,
+		userStateRepo,
+		a.cfg,
+		broadcastSvc,
+	)
+
+	// Запуск сервера метрик
 	metricsSrv := metrics.NewServer(a.logger, a.cfg.MetricsAddr)
 	go func() {
 		if err := metricsSrv.Listen(); err != nil && err != http.ErrServerClosed {
@@ -88,7 +113,6 @@ func (a *App) Run(ctx context.Context) error {
 	var cleanup func() error
 
 	if a.cfg.WebhookHost != "" {
-
 		a.logger.Info("Starting in Webhook mode", "host", a.cfg.WebhookHost)
 		srv := webhook.NewServer(a.logger, a.bot, a.cfg.WebhookHost, a.cfg.Port)
 
@@ -104,14 +128,13 @@ func (a *App) Run(ctx context.Context) error {
 				}
 			}()
 		}
-
 	} else {
-
 		a.logger.Info("Starting in Long Polling mode")
 		poller := polling.NewPoller(a.logger, a.bot)
 		updates = poller.Start(ctx)
 	}
 
+	// Основной цикл обработки обновлений
 	go func() {
 		for {
 			select {

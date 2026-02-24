@@ -2,7 +2,7 @@ package callbacks
 
 import (
 	"log/slog"
-
+	"max-moderation-bot/internal/broadcast"
 	"max-moderation-bot/internal/repository"
 	"max-moderation-bot/internal/service"
 
@@ -13,15 +13,24 @@ import (
 type CallbackHandler struct {
 	logger        *slog.Logger
 	svc           service.Service
+	svcBroadcast  *broadcast.Service  // ✅ Сервис рассылки
 	bot           *maxbot.Api
 	userStateRepo repository.UserStateRepository
 	tracer        trace.Tracer
 }
 
-func NewCallbackHandler(logger *slog.Logger, svc service.Service, bot *maxbot.Api, userStateRepo repository.UserStateRepository, tracer trace.Tracer) *CallbackHandler {
+func NewCallbackHandler(
+	logger *slog.Logger,
+	svc service.Service,
+	svcBroadcast *broadcast.Service,  // ✅ Параметр конструктора
+	bot *maxbot.Api,
+	userStateRepo repository.UserStateRepository,
+	tracer trace.Tracer,
+) *CallbackHandler {
 	return &CallbackHandler{
 		logger:        logger,
 		svc:           svc,
+		svcBroadcast:  svcBroadcast,
 		bot:           bot,
 		userStateRepo: userStateRepo,
 		tracer:        tracer,

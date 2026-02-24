@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"max-moderation-bot/internal/broadcast"
 	"max-moderation-bot/internal/config"
 	"max-moderation-bot/internal/repository"
 	"max-moderation-bot/internal/service"
@@ -27,9 +28,17 @@ type Handler struct {
 	tracer          trace.Tracer
 	config          *config.Config
 	callbackHandler *callbacks.CallbackHandler
+	broadcastSvc    *broadcast.Service
 }
 
-func NewHandler(logger *slog.Logger, svc service.Service, bot *maxbot.Api, userStateRepo repository.UserStateRepository, cfg *config.Config) *Handler {
+func NewHandler(
+	logger *slog.Logger,
+	svc service.Service,
+	bot *maxbot.Api,
+	userStateRepo repository.UserStateRepository,
+	cfg *config.Config,
+	broadcastSvc *broadcast.Service,
+) *Handler {
 	return &Handler{
 		logger:          logger,
 		svc:             svc,
@@ -37,7 +46,15 @@ func NewHandler(logger *slog.Logger, svc service.Service, bot *maxbot.Api, userS
 		userStateRepo:   userStateRepo,
 		tracer:          otel.Tracer("handler"),
 		config:          cfg,
-		callbackHandler: callbacks.NewCallbackHandler(logger, svc, bot, userStateRepo, otel.Tracer("callbacks")),
+		broadcastSvc:    broadcastSvc,
+		callbackHandler: callbacks.NewCallbackHandler(
+			logger,
+			svc,
+			broadcastSvc,
+			bot,
+			userStateRepo,
+			otel.Tracer("callbacks"),
+		),
 	}
 }
 

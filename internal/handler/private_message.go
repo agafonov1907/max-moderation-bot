@@ -54,6 +54,22 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 	text := strings.TrimSpace(upd.Message.Body.Text)
 	state, _ := h.userStateRepo.GetState(upd.Message.Sender.UserId)
 
+	h.logger.Debug("DEBUG private_message",
+	"user_id", upd.Message.Sender.UserId,
+	"state_exists", state != nil,
+	"state_action", func() string {
+		if state != nil {
+			return fmt.Sprintf("'%s' (len=%d)", state.Action, len(state.Action))
+		}
+		return "nil"
+	}(),
+	"has_attachments", len(upd.Message.Body.RawAttachments) > 0,
+	"attachment_count", len(upd.Message.Body.RawAttachments),
+	"text", text,
+	"text_len", len(text),
+	"command", upd.GetCommand(),
+)
+
 	// 1. Обработка состояний (FSM)
 	if state != nil {
 		switch state.Action {

@@ -63,14 +63,15 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to init db: %w", err)
 	}
 
+	// === ИНИЦИАЛИЗАЦИЯ РЕПОЗИТОРИЕВ ===
 	settingsRepo := repository.NewSettingsRepository(db, a.cfg.EnableCache)
 	chatAdminRepo := repository.NewChatAdminRepository(db)
 	linkTokenRepo := repository.NewLinkTokenRepository(db)
-
 	muteRepo := repository.NewMuteRepository(db)
 	userStateRepo := repository.NewUserStateRepository(db)
 	tempMessageRepo := repository.NewTemporaryMessageRepository(db)
 	violationRepo := repository.NewViolationRepository(db)
+	chatRepo := repository.NewChatRepository(db)  // ✅ Новый репозиторий для работы с названиями чатов
 
 	// ✅ Создаём сервис рассылки
 	broadcastSvc := broadcast.NewService(a.logger, a.bot)
@@ -84,6 +85,7 @@ func (a *App) Run(ctx context.Context) error {
 		muteRepo,
 		tempMessageRepo,
 		violationRepo,
+		chatRepo,  // ✅ Новый аргумент - передаём chatRepo
 		a.bot,
 	)
 

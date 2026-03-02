@@ -424,29 +424,34 @@ func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 	}
 }
 
-// ✅ НОВАЯ ФУНКЦИЯ: Обработчик команды /getchats
+// ✅ НОВАЯ ФУНКЦИЯ: Обработчик команды /getchats с названиями чатов
 func (h *Handler) handleGetChatsCommand(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
 	userID := upd.Message.Sender.UserId
 	
-	chats, err := h.svc.GetManagedChats(ctx, userID)
+	// ✅ Получаем чаты с названиями
+	chatInfos, err := h.svc.GetManagedChatsWithNames(ctx, userID)
 	if err != nil {
-		h.logger.Error("Failed to get managed chats", "error", err)
+		h.logger.Error("Failed to get managed chats with names", "error", err)
 		h.sendText(ctx, userID, "❌ Ошибка при получении списка чатов.")
 		return
 	}
 
-	if len(chats) == 0 {
+	if len(chatInfos) == 0 {
 		h.sendText(ctx, userID, messages.MsgNoManagedGroups)
 		return
 	}
 
-	// Формируем список чатов с ID
+	// Формируем список чатов с названиями и ID
 	var list strings.Builder
 	list.WriteString(messages.MsgGetChatsTitle)
 	
-	for i, chatID := range chats {
-		// Упрощённое название чата (можно улучшить, получая названия из БД)
-		list.WriteString(fmt.Sprintf("%d. **Чат %d** (ID: `%d`)\n", i+1, chatID, chatID))
+	for i, chat := range chatInfos {
+		// Показываем название + ID в скобках
+		chatLabel := chat.Name
+		if chatLabel == "" {
+			chatLabel = fmt.Sprintf("Чат %d", chat.ID)
+		}
+		list.WriteString(fmt.Sprintf("%d. **%s** (ID: `%d`)\n", i+1, chatLabel, chat.ID))
 	}
 	
 	list.WriteString("\n_Используйте эти ID для рассылки через `/broadcast ID1,ID2 текст`_")

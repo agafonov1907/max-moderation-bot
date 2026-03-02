@@ -17,10 +17,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// Service определяет интерфейс сервиса модерации
 type Service interface {
 	ModerateMessage(ctx context.Context, payload pipeline.Payload) (*pipeline.Result, error)
 	GenerateLinkToken(ctx context.Context, userID int64) (string, error)
 	GetManagedChats(ctx context.Context, userID int64) ([]int64, error)
+	GetManagedChatsWithNames(ctx context.Context, userID int64) ([]repository.ChatInfo, error) // ✅ Новый метод
 	GetManagedChatsPaginated(ctx context.Context, userID int64, page int) ([]int64, int64, error)
 	GetChatSettings(ctx context.Context, chatID int64) (*repository.ChatSettings, error)
 	ToggleSetting(ctx context.Context, chatID int64, setting string) (bool, error)
@@ -44,6 +46,7 @@ type Service interface {
 	IsChatOwner(ctx context.Context, chatID, userID int64) (bool, error)
 }
 
+// ModerationService реализует сервис модерации
 type ModerationService struct {
 	logger          *slog.Logger
 	settingsRepo    repository.SettingsRepository
@@ -52,11 +55,13 @@ type ModerationService struct {
 	muteRepo        repository.MuteRepository
 	tempMessageRepo repository.TemporaryMessageRepository
 	violationRepo   repository.ViolationRepository
+	chatRepo        repository.ChatRepository // ✅ Новое поле для работы с названиями чатов
 	pipeline        *pipeline.Manager
 	tracer          trace.Tracer
 	bot             *maxbot.Api
 }
 
+// NewModerationService создаёт новый экземпляр сервиса
 func NewModerationService(
 	logger *slog.Logger,
 	settingsRepo repository.SettingsRepository,
@@ -65,6 +70,7 @@ func NewModerationService(
 	muteRepo repository.MuteRepository,
 	tempMessageRepo repository.TemporaryMessageRepository,
 	violationRepo repository.ViolationRepository,
+	chatRepo repository.ChatRepository, // ✅ Новый параметр
 	bot *maxbot.Api,
 ) Service {
 
@@ -84,12 +90,14 @@ func NewModerationService(
 		muteRepo:        muteRepo,
 		tempMessageRepo: tempMessageRepo,
 		violationRepo:   violationRepo,
+		chatRepo:        chatRepo, // ✅ Инициализация нового поля
 		pipeline:        pm,
 		tracer:          otel.Tracer("service"),
 		bot:             bot,
 	}
 }
 
+// StartMetricsUpdater запускает фоновую задачу обновления метрик
 func (s *ModerationService) StartMetricsUpdater(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 
@@ -117,6 +125,7 @@ func (s *ModerationService) StartMetricsUpdater(ctx context.Context) {
 	}()
 }
 
+// ModerateMessage обрабатывает сообщение через пайплайн фильтров
 func (s *ModerationService) ModerateMessage(ctx context.Context, payload pipeline.Payload) (*pipeline.Result, error) {
 	ctx, span := s.tracer.Start(ctx, "ModerateMessage")
 	defer span.End()
@@ -125,18 +134,90 @@ func (s *ModerationService) ModerateMessage(ctx context.Context, payload pipelin
 	return s.pipeline.Process(ctx, payload)
 }
 
+// GenerateLinkToken генерирует токен для привязки чата
 func (s *ModerationService) GenerateLinkToken(ctx context.Context, userID int64) (string, error) {
 	_, span := s.tracer.Start(ctx, "GenerateLinkToken")
 	defer span.End()
 	return s.linkTokenRepo.Create(userID, 24*time.Hour)
 }
 
+// GetManagedChats возвращает список ID чатов, которыми управляет пользователь
 func (s *ModerationService) GetManagedChats(ctx context.Context, userID int64) ([]int64, error) {
 	_, span := s.tracer.Start(ctx, "GetManagedChats")
 	defer span.End()
 	return s.chatAdminRepo.GetManagedChats(userID)
 }
 
+// ✅ GetManagedChatsWithNames возвращает список чатов с названиями из MAX API
+func (s *ModerationService) GetManagedChatsWithNames(ctx context.Context, userID int64) ([]repository.ChatInfo, error) {
+	ctx, span := s.tracer.Start(ctx, "GetManagedChatsWithNames")
+	defer span.End()
+
+	s.logger.Debug("GetManagedChatsWithNames: starting", "user_id", userID)
+
+	// 1. Получаем ID чатов из репозитория
+	chatIDs, err := s.chatAdminRepo.GetManagedChats(userID)
+	if err != nil {
+		s.logger.Error("GetManagedChatsWithNames: failed to get chat IDs", "user_id", userID, "error", err)
+		return nil, fmt.Errorf("failed to get managed chat IDs: %w", err)
+	}
+
+	s.logger.Debug("GetManagedChatsWithNames: got chat IDs", "user_id", userID, "count", len(chatIDs), "ids", chatIDs)
+
+	// 2. Обогащаем ID названиями через MAX API
+	var chats []repository.ChatInfo
+	for _, chatID := range chatIDs {
+		// Fallback: если не сможем получить название — используем "Чат {ID}"
+		chatName := fmt.Sprintf("Чат %d", chatID)
+		nameSource := "fallback"
+
+		// Пытаемся получить информацию о чате через MAX API
+		if s.bot != nil {
+			s.logger.Debug("GetManagedChatsWithNames: fetching chat info from API", "chat_id", chatID)
+			
+			chatInfo, err := s.bot.Chats.GetChat(ctx, chatID)
+			if err != nil {
+				s.logger.Warn("GetManagedChatsWithNames: failed to get chat info from API", 
+					"chat_id", chatID, "error", err)
+			} else if chatInfo != nil {
+				// ✅ ОТЛАДКА: вывести полную структуру chatInfo в лог
+				s.logger.Debug("GetManagedChatsWithNames: chat info from API", 
+					"chat_id", chatID, 
+					"info", fmt.Sprintf("%+v", chatInfo))
+				
+				// ✅ ИСПРАВЛЕНО: используем ТОЛЬКО поле Title (единственное доступное в schemes.Chat)
+				if chatInfo.Title != "" {
+					chatName = chatInfo.Title
+					nameSource = "Title"
+					s.logger.Debug("GetManagedChatsWithNames: got title from API", 
+						"chat_id", chatID, "title", chatInfo.Title)
+				} else {
+					s.logger.Debug("GetManagedChatsWithNames: Title field is empty, using fallback", 
+						"chat_id", chatID)
+				}
+			} else {
+				s.logger.Debug("GetManagedChatsWithNames: chatInfo is nil", "chat_id", chatID)
+			}
+		} else {
+			s.logger.Debug("GetManagedChatsWithNames: bot client is nil, using fallback", "chat_id", chatID)
+		}
+
+		s.logger.Debug("GetManagedChatsWithNames: enriched chat", 
+			"chat_id", chatID, 
+			"name", chatName, 
+			"source", nameSource)
+
+		chats = append(chats, repository.ChatInfo{
+			ID:   chatID,
+			Name: chatName,
+		})
+	}
+
+	s.logger.Debug("GetManagedChatsWithNames: completed", "user_id", userID, "total_chats", len(chats))
+	return chats, nil
+}
+
+// GetManagedChatsPaginated возвращает пагинированный список ID чатов
 func (s *ModerationService) GetManagedChatsPaginated(ctx context.Context, userID int64, page int) ([]int64, int64, error) {
 	_, span := s.tracer.Start(ctx, "GetManagedChatsPaginated")
 	defer span.End()
@@ -145,12 +226,14 @@ func (s *ModerationService) GetManagedChatsPaginated(ctx context.Context, userID
 	return s.chatAdminRepo.GetManagedChatsPaginated(userID, offset, pageSize)
 }
 
+// GetChatSettings получает настройки чата
 func (s *ModerationService) GetChatSettings(ctx context.Context, chatID int64) (*repository.ChatSettings, error) {
 	_, span := s.tracer.Start(ctx, "GetChatSettings")
 	defer span.End()
 	return s.settingsRepo.GetSettings(chatID)
 }
 
+// ToggleSetting переключает настройку чата
 func (s *ModerationService) ToggleSetting(ctx context.Context, chatID int64, setting string) (bool, error) {
 	_, span := s.tracer.Start(ctx, "ToggleSetting")
 	defer span.End()
@@ -194,6 +277,7 @@ func (s *ModerationService) ToggleSetting(ctx context.Context, chatID int64, set
 	return newValue, nil
 }
 
+// AddBlockedWords добавляет слова в чёрный список чата
 func (s *ModerationService) AddBlockedWords(ctx context.Context, chatID int64, words []string) error {
 	_, span := s.tracer.Start(ctx, "AddBlockedWords")
 	defer span.End()
@@ -219,6 +303,7 @@ func (s *ModerationService) AddBlockedWords(ctx context.Context, chatID int64, w
 	return s.settingsRepo.UpdateSettings(settings)
 }
 
+// SetBlockedWords полностью заменяет список заблокированных слов
 func (s *ModerationService) SetBlockedWords(ctx context.Context, chatID int64, words []string) error {
 	_, span := s.tracer.Start(ctx, "SetBlockedWords")
 	defer span.End()
@@ -244,6 +329,7 @@ func (s *ModerationService) SetBlockedWords(ctx context.Context, chatID int64, w
 	return s.settingsRepo.UpdateSettings(settings)
 }
 
+// AddBlockedDomains добавляет домены в чёрный список чата
 func (s *ModerationService) AddBlockedDomains(ctx context.Context, chatID int64, domains []string) error {
 	_, span := s.tracer.Start(ctx, "AddBlockedDomains")
 	defer span.End()
@@ -269,6 +355,7 @@ func (s *ModerationService) AddBlockedDomains(ctx context.Context, chatID int64,
 	return s.settingsRepo.UpdateSettings(settings)
 }
 
+// SetBlockedDomains полностью заменяет список заблокированных доменов
 func (s *ModerationService) SetBlockedDomains(ctx context.Context, chatID int64, domains []string) error {
 	_, span := s.tracer.Start(ctx, "SetBlockedDomains")
 	defer span.End()
@@ -294,12 +381,14 @@ func (s *ModerationService) SetBlockedDomains(ctx context.Context, chatID int64,
 	return s.settingsRepo.UpdateSettings(settings)
 }
 
+// InitializeChat инициализирует настройки чата по умолчанию
 func (s *ModerationService) InitializeChat(ctx context.Context, chatID int64) error {
 	_, span := s.tracer.Start(ctx, "InitializeChat")
 	defer span.End()
 	return s.settingsRepo.InitSettings(chatID)
 }
 
+// LinkGroup привязывает чат к пользователю по токену
 func (s *ModerationService) LinkGroup(ctx context.Context, token string, chatID, userID int64) error {
 	_, span := s.tracer.Start(ctx, "LinkGroup")
 	defer span.End()
@@ -317,6 +406,7 @@ func (s *ModerationService) LinkGroup(ctx context.Context, token string, chatID,
 	return s.linkTokenRepo.Delete(token)
 }
 
+// MuteUser блокирует пользователя в чате (по запросу админа)
 func (s *ModerationService) MuteUser(ctx context.Context, chatID, adminID, userID int64, userName string, duration time.Duration) error {
 	_, span := s.tracer.Start(ctx, "MuteUser")
 	defer span.End()
@@ -332,6 +422,8 @@ func (s *ModerationService) MuteUser(ctx context.Context, chatID, adminID, userI
 	}
 	return nil
 }
+
+// SystemMuteUser блокирует пользователя системно (автоматически за нарушения)
 func (s *ModerationService) SystemMuteUser(ctx context.Context, chatID, userID int64, userName string, duration time.Duration) error {
 	_, span := s.tracer.Start(ctx, "SystemMuteUser")
 	defer span.End()
@@ -344,6 +436,7 @@ func (s *ModerationService) SystemMuteUser(ctx context.Context, chatID, userID i
 	return nil
 }
 
+// TrackViolation отслеживает нарушение и возвращает, нужно ли мутить пользователя
 func (s *ModerationService) TrackViolation(ctx context.Context, chatID, userID int64, violationType string) (bool, time.Duration, error) {
 	_, span := s.tracer.Start(ctx, "TrackViolation")
 	defer span.End()
@@ -365,6 +458,8 @@ func (s *ModerationService) TrackViolation(ctx context.Context, chatID, userID i
 
 	return false, 0, nil
 }
+
+// GetActiveMutesPaginated возвращает пагинированный список активных мутов
 func (s *ModerationService) GetActiveMutesPaginated(ctx context.Context, chatID int64, page int) ([]repository.Mute, int64, error) {
 	_, span := s.tracer.Start(ctx, "GetActiveMutesPaginated")
 	defer span.End()
@@ -373,11 +468,14 @@ func (s *ModerationService) GetActiveMutesPaginated(ctx context.Context, chatID 
 	return s.muteRepo.GetActiveMutesPaginated(chatID, offset, pageSize)
 }
 
+// GetMute получает информацию о муте пользователя в чате
 func (s *ModerationService) GetMute(ctx context.Context, chatID, userID int64) (*repository.Mute, error) {
 	_, span := s.tracer.Start(ctx, "GetMute")
 	defer span.End()
 	return s.muteRepo.GetMute(chatID, userID)
 }
+
+// UnmuteUser разблокирует пользователя в чате
 func (s *ModerationService) UnmuteUser(ctx context.Context, chatID, adminID, userID int64) error {
 	_, span := s.tracer.Start(ctx, "UnmuteUser")
 	defer span.End()
@@ -391,12 +489,14 @@ func (s *ModerationService) UnmuteUser(ctx context.Context, chatID, adminID, use
 	return s.muteRepo.UnmuteUser(chatID, userID)
 }
 
+// GetChatStats получает статистику нарушений по чату
 func (s *ModerationService) GetChatStats(ctx context.Context, chatID int64) (*repository.ChatStats, error) {
 	_, span := s.tracer.Start(ctx, "GetChatStats")
 	defer span.End()
 	return s.violationRepo.GetChatTotalStats(ctx, chatID)
 }
 
+// IsChatAdmin проверяет, является ли пользователь админом чата через MAX API
 func (s *ModerationService) IsChatAdmin(ctx context.Context, chatID, userID int64) (bool, error) {
 	_, span := s.tracer.Start(ctx, "IsChatAdmin")
 	defer span.End()
@@ -419,6 +519,7 @@ func (s *ModerationService) IsChatAdmin(ctx context.Context, chatID, userID int6
 	return false, nil
 }
 
+// IsChatOwner проверяет, является ли пользователь владельцем чата через MAX API
 func (s *ModerationService) IsChatOwner(ctx context.Context, chatID, userID int64) (bool, error) {
 	_, span := s.tracer.Start(ctx, "IsChatOwner")
 	defer span.End()

@@ -60,3 +60,8 @@ type ChatStats struct {
 	FileViolations  int64     `gorm:"default:0"`
 	MuteCount       int64     `gorm:"default:0"`
 }
+// ChatInfo представляет информацию о чате для отображения в UI
+type ChatInfo struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}

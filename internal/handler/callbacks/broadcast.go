@@ -54,16 +54,17 @@ func (h *CallbackHandler) handleBroadcastCancel(ctx context.Context, userID int6
 	}
 }
 
-// handleBroadcastSelectChats — показывает список чатов с чекбоксами
+// handleBroadcastSelectChats — показывает список чатов с чекбоксами и названиями
 func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID int64) {
-	chats, err := h.svc.GetManagedChats(ctx, userID)
+	// ✅ Получаем чаты с названиями вместо простых ID
+	chatInfos, err := h.svc.GetManagedChatsWithNames(ctx, userID)
 	if err != nil {
-		h.logger.Error("Failed to get managed chats", "error", err)
+		h.logger.Error("Failed to get managed chats with names", "error", err)
 		h.sendText(ctx, userID, "❌ Ошибка при получении списка чатов.")
 		return
 	}
 
-	if len(chats) == 0 {
+	if len(chatInfos) == 0 {
 		h.sendText(ctx, userID, messages.MsgNoManagedGroups)
 		return
 	}
@@ -84,20 +85,31 @@ func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	row := kb.AddRow()
 
-	for i, chatID := range chats {
+	for i, chat := range chatInfos {
 		mark := "⬜"
-		if selectedChats[chatID] {
+		if selectedChats[chat.ID] {
 			mark = "✅"
 		}
-		chatName := fmt.Sprintf("Чат %d", chatID)
+		
+		// ✅ ПОКАЗЫВАЕМ НАЗВАНИЕ + ID (если название пустое — fallback на "Чат %d")
+		chatLabel := chat.Name
+		if chatLabel == "" {
+			chatLabel = fmt.Sprintf("Чат %d", chat.ID)
+		}
+		
+		// Обрезаем длинное название для кнопки (MAX API имеет лимит ~40 символов)
+		if len(chatLabel) > 35 {
+			chatLabel = chatLabel[:32] + "..."
+		}
 
 		row.AddCallback(
-			fmt.Sprintf("%s %s", mark, chatName),
+			fmt.Sprintf("%s %s", mark, chatLabel),
 			schemes.DEFAULT,
-			fmt.Sprintf("broadcast_toggle_chat_%d", chatID),
+			fmt.Sprintf("broadcast_toggle_chat_%d", chat.ID),
 		)
 
-		if (i+1)%2 == 0 && i < len(chats)-1 {
+		// По 2 кнопки в ряд
+		if (i+1)%2 == 0 && i < len(chatInfos)-1 {
 			row = kb.AddRow()
 		}
 	}

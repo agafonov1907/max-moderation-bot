@@ -73,4 +73,13 @@ const (
 	// Рассылка (Broadcast)
 	BtnBroadcast                 = "📢 Рассылка"
 	MsgBroadcastPrompt           = "📢 **Режим рассылки**\n\nОтправьте текст сообщения, которое нужно разослать во все чаты.\n\n_Поддерживается Markdown форматирование._\n\nНажмите «Отмена», чтобы выйти."
+	// ✅ НОВЫЕ КОНСТАНТЫ ДЛЯ ВЫБОРА ЧАТОВ
+	BtnBroadcastSelectChats      = "📋 Выбор чатов"
+	MsgBroadcastSelectChats      = "📋 **Выберите чаты для рассылки**\n\nНажмите на чат, чтобы отметить/снять отметку.\n\nКогда закончите, нажмите «✅ Готово»."
+	MsgBroadcastChatsSelected    = "✅ Выбрано чатов: %d\n\nТеперь введите текст сообщения для рассылки в выбранные чаты."
+	MsgBroadcastNoChatsSelected  = "❌ Вы не выбрали ни одного чата. Пожалуйста, выберите хотя бы один чат."
+	BtnBroadcastConfirm          = "✅ Готово"
+	BtnBroadcastClear            = "🗑 Очистить выбор"
+	BtnBroadcastSendAll          = "📤 Во все чаты"
+	MsgGetChatsTitle             = "📋 **Ваши управляемые чаты**\n\n"
 )

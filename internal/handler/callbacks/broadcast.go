@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"max-moderation-bot/internal/messages"
+	"strconv"
+	"strings"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
 	"github.com/max-messenger/max-bot-api-client-go/schemes"
@@ -11,7 +13,6 @@ import (
 
 // handleBroadcastStart начинает процесс рассылки
 func (h *CallbackHandler) handleBroadcastStart(ctx context.Context, userID int64) {
-	// Устанавливаем состояние ожидания текста рассылки
 	if err := h.userStateRepo.SetState(userID, 0, "broadcast_wait_text"); err != nil {
 		h.logger.Error("Failed to set broadcast state", "error", err)
 		return
@@ -31,29 +32,173 @@ func (h *CallbackHandler) handleBroadcastStart(ctx context.Context, userID int64
 	}
 }
 
-// handleBroadcastCancel отменяет рассылку
+// handleBroadcastCancel отменяет рассылку и возвращает в меню
 func (h *CallbackHandler) handleBroadcastCancel(ctx context.Context, userID int64) {
 	if err := h.userStateRepo.ClearState(userID); err != nil {
 		h.logger.Error("Failed to clear state", "error", err)
 	}
 
+	// ✅ Отправляем сообщение об отмене с кнопкой возврата в меню
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
-	msg.SetText("Рассылка отменена.")
+	msg.SetText("❌ Рассылка отменена.")
+	msg.SetFormat("markdown")
+
+	// Добавляем кнопку возврата в главное меню
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	kb.AddRow().AddCallback("🔙 В меню", schemes.DEFAULT, "main_menu")
+	msg.AddKeyboard(kb)
+
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send cancel message", "error", err)
 	}
 }
 
+// handleBroadcastSelectChats — показывает список чатов с чекбоксами
+func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID int64) {
+	chats, err := h.svc.GetManagedChats(ctx, userID)
+	if err != nil {
+		h.logger.Error("Failed to get managed chats", "error", err)
+		h.sendText(ctx, userID, "❌ Ошибка при получении списка чатов.")
+		return
+	}
+
+	if len(chats) == 0 {
+		h.sendText(ctx, userID, messages.MsgNoManagedGroups)
+		return
+	}
+
+	// Получаем текущие выбранные чаты из состояния
+	state, _ := h.userStateRepo.GetState(userID)
+	selectedChats := make(map[int64]bool)
+
+	if state != nil && state.Action == "broadcast_selected_chats" && state.Metadata != "" {
+		for _, idStr := range strings.Split(state.Metadata, ",") {
+			if id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64); err == nil {
+				selectedChats[id] = true
+			}
+		}
+	}
+
+	// Строим клавиатуру с чекбоксами
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	row := kb.AddRow()
+
+	for i, chatID := range chats {
+		mark := "⬜"
+		if selectedChats[chatID] {
+			mark = "✅"
+		}
+		chatName := fmt.Sprintf("Чат %d", chatID)
+
+		row.AddCallback(
+			fmt.Sprintf("%s %s", mark, chatName),
+			schemes.DEFAULT,
+			fmt.Sprintf("broadcast_toggle_chat_%d", chatID),
+		)
+
+		if (i+1)%2 == 0 && i < len(chats)-1 {
+			row = kb.AddRow()
+		}
+	}
+
+	// Кнопки управления
+	kb.AddRow().
+		AddCallback(messages.BtnBroadcastSendAll, schemes.POSITIVE, "broadcast_send_all").
+		AddCallback(messages.BtnBroadcastClear, schemes.NEGATIVE, "broadcast_clear_selection")
+	kb.AddRow().
+		AddCallback(messages.BtnBroadcastConfirm, schemes.POSITIVE, "broadcast_confirm_chats").
+		AddCallback("❌ Отмена", schemes.NEGATIVE, "main_menu")
+
+	msg := maxbot.NewMessage()
+	msg.SetUser(userID)
+	msg.SetText(messages.MsgBroadcastSelectChats)
+	msg.SetFormat("markdown")
+	msg.AddKeyboard(kb)
+
+	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		h.logger.Error("Failed to send chat selection", "error", err)
+	}
+}
+
+// handleBroadcastToggleChat — переключает выбор чата
+func (h *CallbackHandler) handleBroadcastToggleChat(ctx context.Context, userID, chatID int64) {
+	state, _ := h.userStateRepo.GetState(userID)
+	selectedChats := make(map[int64]bool)
+
+	if state != nil && state.Action == "broadcast_selected_chats" && state.Metadata != "" {
+		for _, idStr := range strings.Split(state.Metadata, ",") {
+			if id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64); err == nil {
+				selectedChats[id] = true
+			}
+		}
+	}
+
+	// Переключаем чат
+	if selectedChats[chatID] {
+		delete(selectedChats, chatID)
+	} else {
+		selectedChats[chatID] = true
+	}
+
+	// Сохраняем обратно в состояние
+	var idsStr string
+	for id := range selectedChats {
+		if idsStr != "" {
+			idsStr += ","
+		}
+		idsStr += fmt.Sprintf("%d", id)
+	}
+
+	// ✅ ИСПРАВЛЕНО: 4 аргумента (userID, chatID, action, metadata)
+	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_selected_chats", idsStr)
+
+	// Обновляем клавиатуру
+	h.handleBroadcastSelectChats(ctx, userID)
+}
+
+// handleBroadcastConfirmChats — подтверждает выбор и переходит к вводу текста
+func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userID int64) {
+	state, _ := h.userStateRepo.GetState(userID)
+	if state == nil || state.Action != "broadcast_selected_chats" || state.Metadata == "" {
+		h.sendText(ctx, userID, messages.MsgBroadcastNoChatsSelected)
+		return
+	}
+
+	chatCount := len(strings.Split(state.Metadata, ","))
+
+	// ✅ ИСПРАВЛЕНО: 4 аргумента
+	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_text_with_chats", state.Metadata)
+
+	msg := maxbot.NewMessage()
+	msg.SetUser(userID)
+	msg.SetText(fmt.Sprintf(messages.MsgBroadcastChatsSelected, chatCount))
+	msg.SetFormat("markdown")
+
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
+	msg.AddKeyboard(kb)
+
+	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		h.logger.Error("Failed to send broadcast prompt", "error", err)
+	}
+}
+
+// handleBroadcastClearSelection — очищает выбор чатов
+func (h *CallbackHandler) handleBroadcastClearSelection(ctx context.Context, userID int64) {
+	// ✅ ИСПРАВЛЕНО: 4 аргумента
+	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_selected_chats", "")
+	h.handleBroadcastSelectChats(ctx, userID)
+}
+
+// Вспомогательная функция для отправки текста
+
 // ProcessBroadcastInput обрабатывает введенный текст для рассылки
-// Вызывается из handlePrivateMessage в private_message.go при состоянии broadcast_wait_text
 func (h *CallbackHandler) ProcessBroadcastInput(ctx context.Context, userID int64, text string) {
-	// Очищаем состояние перед запуском долгой операции
 	if err := h.userStateRepo.ClearState(userID); err != nil {
 		h.logger.Error("Failed to clear state before broadcast", "error", err)
 	}
 
-	// Сообщаем пользователю о начале процесса
 	statusMsg := maxbot.NewMessage()
 	statusMsg.SetUser(userID)
 	statusMsg.SetText("🚀 Запускаю рассылку по всем чатам... Это может занять некоторое время.")
@@ -62,17 +207,12 @@ func (h *CallbackHandler) ProcessBroadcastInput(ctx context.Context, userID int6
 		h.logger.Error("Failed to send status message", "error", err)
 	}
 
-	// ✅ ЗАПУСКАЕМ РАССЫЛКУ АСИНХРОННО
-	// Важно: BroadcastText принимает (text string, format string), а не *maxbot.Message
 	go func() {
 		bgCtx := context.Background()
-		
-		// ✅ ИСПРАВЛЕНО: Вызываем BroadcastText с правильными параметрами
 		success, failed, errs := h.svcBroadcast.BroadcastText(bgCtx, text, "markdown")
 
-		// Формируем отчет о результатах
 		resultText := fmt.Sprintf("✅ Рассылка завершена!\n\nУспешно: %d\nОшибка: %d", success, failed)
-		
+
 		if len(errs) > 0 && len(errs) <= 3 {
 			resultText += "\n\nПоследние ошибки:\n"
 			for _, e := range errs {
@@ -82,7 +222,6 @@ func (h *CallbackHandler) ProcessBroadcastInput(ctx context.Context, userID int6
 			resultText += fmt.Sprintf("\n... и еще %d ошибок.", len(errs)-3)
 		}
 
-		// Отправляем отчет пользователю
 		resp := maxbot.NewMessage()
 		resp.SetUser(userID)
 		resp.SetText(resultText)

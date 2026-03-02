@@ -26,7 +26,9 @@ type UserState struct {
 	UserID    int64  `gorm:"primaryKey"`
 	ChatID    int64  `gorm:"not null"`
 	Action    string `gorm:"not null"`
-	CreatedAt time.Time
+	Metadata  string `json:"metadata" gorm:"type:text"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 type Mute struct {
 	ID        uint      `gorm:"primaryKey"`

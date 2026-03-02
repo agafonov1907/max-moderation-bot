@@ -19,7 +19,6 @@ import (
 )
 
 func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
-	
 	// === ПРОВЕРКА НА АДМИНИСТРАТОРА ===
 	isAdmin := false
 	for _, adminID := range h.config.AdminUserIDs {
@@ -56,20 +55,20 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 	state, _ := h.userStateRepo.GetState(upd.Message.Sender.UserId)
 
 	h.logger.Debug("DEBUG private_message",
-	"user_id", upd.Message.Sender.UserId,
-	"state_exists", state != nil,
-	"state_action", func() string {
-		if state != nil {
-			return fmt.Sprintf("'%s' (len=%d)", state.Action, len(state.Action))
-		}
-		return "nil"
-	}(),
-	"has_attachments", len(upd.Message.Body.RawAttachments) > 0,
-	"attachment_count", len(upd.Message.Body.RawAttachments),
-	"text", text,
-	"text_len", len(text),
-	"command", upd.GetCommand(),
-)
+		"user_id", upd.Message.Sender.UserId,
+		"state_exists", state != nil,
+		"state_action", func() string {
+			if state != nil {
+				return fmt.Sprintf("'%s' (len=%d)", state.Action, len(state.Action))
+			}
+			return "nil"
+		}(),
+		"has_attachments", len(upd.Message.Body.RawAttachments) > 0,
+		"attachment_count", len(upd.Message.Body.RawAttachments),
+		"text", text,
+		"text_len", len(text),
+		"command", upd.GetCommand(),
+	)
 
 	// 1. Обработка состояний (FSM)
 	if state != nil {
@@ -79,7 +78,7 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 			return
 
 		case "broadcast_wait_text":
-			// Обработка ввода текста для рассылки
+			// Обработка ввода текста для рассылки во все чаты
 			if strings.HasPrefix(text, "/cancel") || text == "❌ Отмена" {
 				h.userStateRepo.ClearState(upd.Message.Sender.UserId)
 				h.sendText(ctx, upd.Message.Sender.UserId, "Рассылка отменена.")
@@ -91,8 +90,32 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 				return
 			}
 
-			// Запускаем рассылку с введенным текстом и текущими вложениями
+			// Запускаем рассылку с введенным текстом и текущими вложениями (во все чаты)
 			h.performBroadcast(ctx, upd.Message.Sender.UserId, "", text, upd.Message.Body.RawAttachments)
+
+			// Очищаем состояние после запуска
+			h.userStateRepo.ClearState(upd.Message.Sender.UserId)
+			return
+
+		// ✅ НОВЫЙ КЕЙС: рассылка в выбранные чаты
+		case "broadcast_wait_text_with_chats":
+			// Обработка ввода текста для рассылки в выбранные чаты
+			if strings.HasPrefix(text, "/cancel") || text == "❌ Отмена" {
+				h.userStateRepo.ClearState(upd.Message.Sender.UserId)
+				h.sendText(ctx, upd.Message.Sender.UserId, "Рассылка отменена.")
+				return
+			}
+			// ✅ ПРОВЕРКА: текст ИЛИ вложения
+			if text == "" && len(upd.Message.Body.RawAttachments) == 0 {
+				h.sendText(ctx, upd.Message.Sender.UserId, "Сообщение не может быть пустым. Отправьте текст или файл.")
+				return
+			}
+
+			// Получаем выбранные чаты из Metadata состояния (формат: "123,456,789")
+			selectedChatsStr := state.Metadata
+
+			// Запускаем рассылку только в выбранные чаты
+			h.performBroadcast(ctx, upd.Message.Sender.UserId, selectedChatsStr, text, upd.Message.Body.RawAttachments)
 
 			// Очищаем состояние после запуска
 			h.userStateRepo.ClearState(upd.Message.Sender.UserId)
@@ -112,6 +135,12 @@ func (h *Handler) handlePrivateMessage(ctx context.Context, upd *schemes.Message
 	// 2. Обработка команд вне состояний
 	if strings.HasPrefix(upd.GetCommand(), "/broadcast") {
 		h.handleBroadcastCommand(ctx, upd)
+		return
+	}
+
+	// ✅ НОВАЯ КОМАНДА: Получить список чатов с ID
+	if strings.HasPrefix(upd.GetCommand(), "/getchats") {
+		h.handleGetChatsCommand(ctx, upd)
 		return
 	}
 
@@ -289,8 +318,22 @@ func (h *Handler) performBroadcast(ctx context.Context, userID int64, chatIDStr 
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	// ✅ ФОРМИРУЕМ ОТЧЁТ С КНОПКОЙ "НАЗАД"
 	report := fmt.Sprintf("✅ Рассылка завершена!\nУспешно: %d\nОшибка: %d", successCount, failCount)
-	h.sendText(ctx, userID, report)
+
+	msg := maxbot.NewMessage()
+	msg.SetUser(userID)
+	msg.SetText(report)
+	msg.SetFormat("markdown")
+
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	kb.AddRow().AddCallback("🔙 В главное меню", schemes.DEFAULT, "main_menu")
+	msg.AddKeyboard(kb)
+
+	// Отправляем отчёт с кнопкой
+	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		h.logger.Error("Failed to send broadcast report", "error", err)
+	}
 }
 
 // isLikelyChatIDs проверяет, похожа ли строка на список ID (цифры и запятые)
@@ -364,7 +407,11 @@ func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
-	// Добавляем кнопку рассылки
+	
+	// ✅ НОВАЯ КНОПКА: Выбор чатов для рассылки
+	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
+	
+	// Кнопка общей рассылки
 	kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
 
 	msg := maxbot.NewMessage()
@@ -375,6 +422,36 @@ func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send main menu", "error", err)
 	}
+}
+
+// ✅ НОВАЯ ФУНКЦИЯ: Обработчик команды /getchats
+func (h *Handler) handleGetChatsCommand(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
+	userID := upd.Message.Sender.UserId
+	
+	chats, err := h.svc.GetManagedChats(ctx, userID)
+	if err != nil {
+		h.logger.Error("Failed to get managed chats", "error", err)
+		h.sendText(ctx, userID, "❌ Ошибка при получении списка чатов.")
+		return
+	}
+
+	if len(chats) == 0 {
+		h.sendText(ctx, userID, messages.MsgNoManagedGroups)
+		return
+	}
+
+	// Формируем список чатов с ID
+	var list strings.Builder
+	list.WriteString(messages.MsgGetChatsTitle)
+	
+	for i, chatID := range chats {
+		// Упрощённое название чата (можно улучшить, получая названия из БД)
+		list.WriteString(fmt.Sprintf("%d. **Чат %d** (ID: `%d`)\n", i+1, chatID, chatID))
+	}
+	
+	list.WriteString("\n_Используйте эти ID для рассылки через `/broadcast ID1,ID2 текст`_")
+
+	h.sendText(ctx, userID, list.String())
 }
 
 func (h *Handler) handleFileImport(ctx context.Context, userID, chatID int64, rawAttachments []json.RawMessage) {

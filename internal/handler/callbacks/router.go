@@ -152,6 +152,30 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		}
 		return
 
+		// === ВЫБОР ЧАТОВ ДЛЯ РАССЫЛКИ ===
+	case payload == "broadcast_select_chats":
+		// Показать список чатов с чекбоксами
+		h.handleBroadcastSelectChats(ctx, userID)
+		return
+
+	case strings.HasPrefix(payload, "broadcast_toggle_chat_"):
+		// Переключить выбор чата
+		var chatID int64
+		if _, err := fmt.Sscanf(payload, "broadcast_toggle_chat_%d", &chatID); err == nil {
+			h.handleBroadcastToggleChat(ctx, userID, chatID)
+		}
+		return
+
+	case payload == "broadcast_confirm_chats":
+		// Подтвердить выбор и перейти к вводу текста
+		h.handleBroadcastConfirmChats(ctx, userID)
+		return
+
+	case payload == "broadcast_clear_selection":
+		// Очистить выбор чатов
+		h.handleBroadcastClearSelection(ctx, userID)
+		return
+
 	default:
 		h.logger.Warn("Unknown callback payload", "payload", payload)
 	}
@@ -162,16 +186,20 @@ func (h *CallbackHandler) sendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
-	// Кнопка рассылки
-	kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
+	
+	// ✅ НОВАЯ КНОПКА: Выбор чатов для рассылки
+    kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
+    
+    // Кнопка общей рассылки
+    kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
 
-	msg := maxbot.NewMessage()
-	msg.SetUser(userID)
-	msg.SetText(messages.MsgMainMenu)
-	msg.SetFormat("markdown")
-	msg.AddKeyboard(kb)
+    msg := maxbot.NewMessage()
+    msg.SetUser(userID)
+    msg.SetText(messages.MsgMainMenu)
+    msg.SetFormat("markdown")
+    msg.AddKeyboard(kb)
 
-	if err := h.bot.Messages.Send(ctx, msg); err != nil {
-		h.logger.Error("Failed to send main menu", "error", err)
-	}
+    if err := h.bot.Messages.Send(ctx, msg); err != nil {
+        h.logger.Error("Failed to send main menu", "error", err)
+    }
 }

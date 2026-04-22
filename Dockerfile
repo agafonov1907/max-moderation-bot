@@ -1,51 +1,40 @@
-# Build stage
+# === Этап 1: Сборка ===
 FROM golang:1.25-alpine AS builder
 
+# Установка зависимостей
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Рабочая директория
 WORKDIR /app
 
-# Install git for fetching dependencies
-RUN apk add --no-cache git
-
-# Copy go.mod and go.sum first to leverage cache
+# Копирование go.mod и go.sum
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Install goose migration tool
-RUN go install github.com/pressly/goose/v3/cmd/goose@latest
-
-# Copy the source code
+# Копирование исходного кода
 COPY . .
 
-# Build the application
-# CGO_ENABLED=0 for static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o bot ./cmd/bot
+# Сборка бинарника
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot ./cmd/bot
 
-# Final stage
-FROM alpine:latest
+# === Этап 2: Финальный образ ===
+FROM alpine:3.19
 
-WORKDIR /app
+# Установка часового пояса и корневых сертификатов
+RUN apk --no-cache add ca-certificates tzdata
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Рабочая директория
+WORKDIR /root/
 
-# Copy the binary from builder
+# Копирование бинарника из builder
 COPY --from=builder /app/bot .
-# Copy goose binary from builder
-COPY --from=builder /go/bin/goose /usr/local/bin/goose
-# Copy migrations
-COPY --from=builder /app/migrations ./migrations
-# Copy startup script
-COPY --from=builder /app/start.sh .
 
-# Make startup script executable
-RUN chmod +x start.sh
+# Копирование конфигурационных файлов
+COPY --from=builder /app/configs/ ./configs/
+#COPY --from=builder /app/.env .
 
-# Create a non-root user
-RUN adduser -D -g '' botuser
-USER botuser
-
-# Expose port (if needed for webhook)
+# Порт для webhook (если используется)
 EXPOSE 8080
-EXPOSE 9090
 
-CMD ["./start.sh"]
+# Запуск бота
+CMD ["./bot"]

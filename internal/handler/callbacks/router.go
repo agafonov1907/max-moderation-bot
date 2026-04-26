@@ -119,24 +119,14 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 
 	// === РАССЫЛКА ===
 	case payload == "broadcast_start":
-		// Устанавливаем состояние ожидания текста рассылки
-		if err := h.userStateRepo.SetState(userID, 0, "broadcast_wait_text"); err != nil {
-			h.logger.Error("Failed to set broadcast state", "error", err)
-			return
-		}
-		msg := maxbot.NewMessage()
-		msg.SetUser(userID)
-		msg.SetText("📢 **Режим рассылки**\n\nОтправьте текст сообщения (можно с фото/файлом).\n\nНапишите /cancel для отмены.")
-		msg.SetFormat("markdown")
+		// ✅ Вызываем обновлённую функцию с экраном подтверждения
+		h.handleBroadcastStart(ctx, userID)
+		return
 
-		// Добавляем кнопку отмены
-		kb := h.bot.Messages.NewKeyboardBuilder()
-		kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
-		msg.AddKeyboard(kb)
-
-		if err := h.bot.Messages.Send(ctx, msg); err != nil {
-			h.logger.Error("Failed to send broadcast prompt", "error", err)
-		}
+	// ✅ НОВЫЙ КЕЙС: Финальное подтверждение для рассылки во все чаты
+	case payload == "broadcast_start_final":
+		// Переход к вводу текста для рассылки во все чаты
+		h.handleBroadcastStartFinal(ctx, userID)
 		return
 
 	case payload == "broadcast_cancel":
@@ -167,8 +157,13 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		return
 
 	case payload == "broadcast_confirm_chats":
-		// Подтвердить выбор и перейти к вводу текста
+		// Показать экран подтверждения перед рассылкой
 		h.handleBroadcastConfirmChats(ctx, userID)
+		return
+
+	case payload == "broadcast_confirm_final":
+		// ✅ Финальное подтверждение → переход к вводу текста
+		h.handleBroadcastFinalConfirm(ctx, userID)
 		return
 
 	case payload == "broadcast_clear_selection":
@@ -197,10 +192,10 @@ func (h *CallbackHandler) sendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
-	
+
 	// ✅ НОВАЯ КНОПКА: Выбор чатов для рассылки
 	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
-	
+
 	// Кнопка общей рассылки
 	kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
 

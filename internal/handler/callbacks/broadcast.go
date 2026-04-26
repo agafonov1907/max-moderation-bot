@@ -14,24 +14,36 @@ import (
 // Константа для пагинации: количество чатов на одной странице
 const broadcastChatsPerPage = 10
 
-// handleBroadcastStart начинает процесс рассылки
+// handleBroadcastStart — показывает экран подтверждения перед рассылкой во все чаты
 func (h *CallbackHandler) handleBroadcastStart(ctx context.Context, userID int64) {
-	if err := h.userStateRepo.SetState(userID, 0, "broadcast_wait_text"); err != nil {
-		h.logger.Error("Failed to set broadcast state", "error", err)
-		return
+	// Получаем количество чатов для информирования
+	chatInfos, err := h.svc.GetManagedChatsWithNames(ctx, userID)
+	chatCount := 0
+	if err == nil {
+		chatCount = len(chatInfos)
 	}
 
+	// ✅ Показываем экран подтверждения
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
-	msg.SetText(messages.MsgBroadcastPrompt)
+	msg.SetText(fmt.Sprintf("⚠️ **Подтверждение рассылки**\n\n"+
+		"Вы собираетесь отправить сообщение во **все %d чат(ов)**.\n\n"+
+		"Сейчас вы введёте текст сообщения, и оно будет отправлено во все ваши чаты.\n\n"+
+		"⚠️ **Это действие нельзя отменить после отправки!**\n\n"+
+		"Нажмите **✅ Подтвердить** для продолжения или **❌ Отмена**.", chatCount))
 	msg.SetFormat("markdown")
 
 	kb := h.bot.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
+	kb.AddRow().
+		AddCallback("✅ Подтвердить", schemes.POSITIVE, "broadcast_start_final").
+		AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
 	msg.AddKeyboard(kb)
 
+	// Сохраняем состояние ожидания финального подтверждения
+	_ = h.userStateRepo.SetState(userID, 0, "broadcast_wait_confirm_all")
+
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
-		h.logger.Error("Failed to send broadcast prompt", "error", err)
+		h.logger.Error("Failed to send confirm prompt", "error", err)
 	}
 }
 
@@ -244,7 +256,7 @@ func (h *CallbackHandler) handleBroadcastToggleChat(ctx context.Context, userID,
 	h.handleBroadcastSelectChats(ctx, userID, currentPage)
 }
 
-// handleBroadcastConfirmChats — подтверждает выбор и переходит к вводу текста
+// handleBroadcastConfirmChats — показывает экран подтверждения перед рассылкой
 func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userID int64) {
 	state, _ := h.userStateRepo.GetState(userID)
 	if state == nil || state.Action != "broadcast_selected_chats" || state.Metadata == "" {
@@ -270,21 +282,29 @@ func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userI
 		return
 	}
 
-	// Переходим к состоянию ожидания текста (сохраняем выбранные ID)
-	selectedChatsStr := strings.Join(selectedIDs, ",")
-	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_text_with_chats", selectedChatsStr)
+	chatCount := len(selectedIDs)
 
+	// ✅ НОВОЕ: Показываем экран подтверждения
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
-	msg.SetText(fmt.Sprintf(messages.MsgBroadcastChatsSelected, len(selectedIDs)))
+	msg.SetText(fmt.Sprintf("⚠️ **Подтверждение рассылки**\n\n"+
+		"Вы выбрали **%d чат(ов)** для рассылки.\n\n"+
+		"Сейчас вы введёте текст сообщения, и оно будет отправлено во все выбранные чаты.\n\n"+
+		"⚠️ **Это действие нельзя отменить после отправки!**\n\n"+
+		"Нажмите **✅ Подтвердить** для продолжения или **❌ Отмена**.", chatCount))
 	msg.SetFormat("markdown")
 
 	kb := h.bot.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
+	kb.AddRow().
+		AddCallback("✅ Подтвердить", schemes.POSITIVE, "broadcast_confirm_final").
+		AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
 	msg.AddKeyboard(kb)
 
+	// Сохраняем состояние ожидания финального подтверждения
+	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_confirm", state.Metadata)
+
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
-		h.logger.Error("Failed to send broadcast prompt", "error", err)
+		h.logger.Error("Failed to send confirm prompt", "error", err)
 	}
 }
 
@@ -369,6 +389,81 @@ func (h *CallbackHandler) handleBroadcastNextPage(ctx context.Context, userID in
 	}
 
 	h.handleBroadcastSelectChats(ctx, userID, newPage)
+}
+
+// handleBroadcastFinalConfirm — финальное подтверждение, переход к вводу текста (для выбранных чатов)
+func (h *CallbackHandler) handleBroadcastFinalConfirm(ctx context.Context, userID int64) {
+	state, _ := h.userStateRepo.GetState(userID)
+	if state == nil || state.Action != "broadcast_wait_confirm" || state.Metadata == "" {
+		h.sendText(ctx, userID, "❌ Сессия истекла. Начните заново через /start")
+		return
+	}
+
+	// Извлекаем выбранные чаты из Metadata (формат: "selected:123,456;page:2")
+	var selectedIDs []string
+	parts := strings.Split(state.Metadata, ";")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "selected:") {
+			idsStr := strings.TrimPrefix(part, "selected:")
+			if idsStr != "" {
+				selectedIDs = strings.Split(idsStr, ",")
+			}
+			break
+		}
+	}
+
+	if len(selectedIDs) == 0 {
+		h.sendText(ctx, userID, messages.MsgBroadcastNoChatsSelected)
+		return
+	}
+
+	// Переходим к состоянию ожидания текста
+	selectedChatsStr := strings.Join(selectedIDs, ",")
+	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_text_with_chats", selectedChatsStr)
+
+	msg := maxbot.NewMessage()
+	msg.SetUser(userID)
+	msg.SetText("✍️ **Введите текст рассылки**\n\n" +
+		"Отправьте сообщение (можно с фото/файлом).\n\n" +
+		"Поддерживается Markdown.\n\n" +
+		"/cancel — отмена")
+	msg.SetFormat("markdown")
+
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
+	msg.AddKeyboard(kb)
+
+	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		h.logger.Error("Failed to send text prompt", "error", err)
+	}
+}
+
+// ✅ НОВАЯ ФУНКЦИЯ: Финальное подтверждение для рассылки во все чаты
+func (h *CallbackHandler) handleBroadcastStartFinal(ctx context.Context, userID int64) {
+	state, _ := h.userStateRepo.GetState(userID)
+	if state == nil || state.Action != "broadcast_wait_confirm_all" {
+		h.sendText(ctx, userID, "❌ Сессия истекла. Начните заново через /start")
+		return
+	}
+
+	// Переходим к состоянию ожидания текста (для всех чатов)
+	_ = h.userStateRepo.SetState(userID, 0, "broadcast_wait_text")
+
+	msg := maxbot.NewMessage()
+	msg.SetUser(userID)
+	msg.SetText("✍️ **Введите текст рассылки**\n\n" +
+		"Отправьте сообщение (можно с фото/файлом).\n\n" +
+		"Поддерживается Markdown.\n\n" +
+		"/cancel — отмена")
+	msg.SetFormat("markdown")
+
+	kb := h.bot.Messages.NewKeyboardBuilder()
+	kb.AddRow().AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
+	msg.AddKeyboard(kb)
+
+	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		h.logger.Error("Failed to send text prompt", "error", err)
+	}
 }
 
 // ProcessBroadcastInput обрабатывает введенный текст для рассылки

@@ -58,30 +58,30 @@ func (s *Service) BroadcastText(ctx context.Context, text string, format string)
 			newMsg := maxbot.NewMessage().
 				SetChat(chat.ChatId).
 				SetText(text)
-			
+
 			if format != "" {
 				newMsg.SetFormat(format)
 			}
-			
+
 			// Отправляем
 			if err := s.bot.Messages.Send(ctx, newMsg); err != nil {
-				s.logger.Warn("Failed to send broadcast to chat", 
-					"chat_id", chat.ChatId, 
-					"title", chat.Title, 
+				s.logger.Warn("Failed to send broadcast to chat",
+					"chat_id", chat.ChatId,
+					"title", chat.Title,
 					"error", err)
 				failCount++
 				errorsList = append(errorsList, fmt.Errorf("chat %d: %w", chat.ChatId, err))
-				
+
 				// Небольшая задержка, чтобы не превысить лимиты API (Rate Limit)
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 
 			successCount++
-			s.logger.Debug("Broadcast sent successfully", 
-				"chat_id", chat.ChatId, 
+			s.logger.Debug("Broadcast sent successfully",
+				"chat_id", chat.ChatId,
 				"title", chat.Title)
-			
+
 			// Задержка между сообщениями
 			time.Sleep(100 * time.Millisecond)
 		}

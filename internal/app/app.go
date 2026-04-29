@@ -37,7 +37,6 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot client: %w", err)
 	}
-
 	return &App{
 		cfg:    cfg,
 		logger: logger,
@@ -49,21 +48,16 @@ func NewApp(cfg *config.Config, logger *slog.Logger) (*App, error) {
 func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-
 	a.logger.Info("Starting Max Moderation Bot")
-
 	botInfo, err := a.bot.Bots.GetBot(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get bot info: %w", err)
 	}
 	a.logger.Info("Bot connected", "username", botInfo.Username, "id", botInfo.UserId)
-
 	db, err := repository.NewPostgresDB(a.cfg.GetDSN())
 	if err != nil {
 		return fmt.Errorf("failed to init db: %w", err)
 	}
-
-	// === ИНИЦИАЛИЗАЦИЯ РЕПОЗИТОРИЕВ ===
 	settingsRepo := repository.NewSettingsRepository(db, a.cfg.EnableCache)
 	chatAdminRepo := repository.NewChatAdminRepository(db)
 	linkTokenRepo := repository.NewLinkTokenRepository(db)
@@ -71,12 +65,13 @@ func (a *App) Run(ctx context.Context) error {
 	userStateRepo := repository.NewUserStateRepository(db)
 	tempMessageRepo := repository.NewTemporaryMessageRepository(db)
 	violationRepo := repository.NewViolationRepository(db)
-	chatRepo := repository.NewChatRepository(db)  // ✅ Новый репозиторий для работы с названиями чатов
-
-	// ✅ Создаём сервис рассылки
+	chatRepo := repository.NewChatRepository(db)
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB from gorm.DB: %w", err)
+	}
+	statsRepo := repository.NewPostgresRepository(sqlDB)
 	broadcastSvc := broadcast.NewService(a.logger, a.bot)
-
-	// Создаём основной сервис модерации
 	svc := service.NewModerationService(
 		a.logger,
 		settingsRepo,
@@ -85,15 +80,12 @@ func (a *App) Run(ctx context.Context) error {
 		muteRepo,
 		tempMessageRepo,
 		violationRepo,
-		chatRepo,  // ✅ Новый аргумент - передаём chatRepo
+		chatRepo,
 		a.bot,
+		statsRepo,
 	)
-
-	// Запускаем фоновые задачи сервиса
 	svc.StartMetricsUpdater(ctx)
 	svc.StartCleanupTask(ctx, a.bot)
-
-	// ✅ Передаём broadcastSvc в хендлер (6-й аргумент)
 	h := handler.NewHandler(
 		a.logger,
 		svc,
@@ -101,23 +93,20 @@ func (a *App) Run(ctx context.Context) error {
 		userStateRepo,
 		a.cfg,
 		broadcastSvc,
+		statsRepo,
+		settingsRepo,
 	)
-
-	// Запуск сервера метрик
 	metricsSrv := metrics.NewServer(a.logger, a.cfg.MetricsAddr)
 	go func() {
 		if err := metricsSrv.Listen(); err != nil && err != http.ErrServerClosed {
 			a.logger.Error("Metrics server failed", "error", err)
 		}
 	}()
-
 	var updates <-chan schemes.UpdateInterface
 	var cleanup func() error
-
 	if a.cfg.WebhookHost != "" {
 		a.logger.Info("Starting in Webhook mode", "host", a.cfg.WebhookHost)
 		srv := webhook.NewServer(a.logger, a.bot, a.cfg.WebhookHost, a.cfg.Port)
-
 		var err error
 		updates, cleanup, err = srv.Start(ctx)
 		if err != nil {
@@ -135,8 +124,6 @@ func (a *App) Run(ctx context.Context) error {
 		poller := polling.NewPoller(a.logger, a.bot)
 		updates = poller.Start(ctx)
 	}
-
-	// Основной цикл обработки обновлений
 	go func() {
 		for {
 			select {
@@ -150,9 +137,7 @@ func (a *App) Run(ctx context.Context) error {
 			}
 		}
 	}()
-
 	<-ctx.Done()
 	a.logger.Info("Shutting down...")
-
 	return nil
 }

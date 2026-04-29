@@ -7,60 +7,65 @@ import (
 )
 
 type ChatSettings struct {
-	ChatID           int64          `gorm:"primaryKey;autoIncrement:false"`
-	BlockedWords     pq.StringArray `gorm:"type:text[]"`
-	BlockedDomains   pq.StringArray `gorm:"type:text[]"`
-	RestrictImage    bool           `gorm:"default:false"`
-	RestrictVideo    bool           `gorm:"default:false"`
-	RestrictAudio    bool           `gorm:"default:false"`
-	RestrictFile     bool           `gorm:"default:false"`
-	EnableWordFilter bool           `gorm:"default:true"`
-	EnableLinkFilter bool           `gorm:"default:true"`
-	EnableMute       bool           `gorm:"default:false"`
-	EnableAutoDelete bool           `gorm:"default:true"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ChatID           int64          `gorm:"primaryKey" json:"chat_id"`
+	BlockedWords     pq.StringArray `gorm:"type:text[]" json:"blocked_words"`
+	BlockedDomains   pq.StringArray `gorm:"type:text[]" json:"blocked_domains"`
+	RestrictImage    bool           `gorm:"default:false" json:"restrict_image"`
+	RestrictVideo    bool           `gorm:"default:false" json:"restrict_video"`
+	RestrictAudio    bool           `gorm:"default:false" json:"restrict_audio"`
+	RestrictFile     bool           `gorm:"default:false" json:"restrict_file"`
+	EnableWordFilter bool           `gorm:"default:true" json:"enable_word_filter"`
+	EnableLinkFilter bool           `gorm:"default:true" json:"enable_link_filter"`
+	EnableMute       bool           `gorm:"default:true" json:"enable_mute"`
+	EnableAutoDelete bool           `gorm:"default:true" json:"enable_auto_delete"`
+	CreatedAt        time.Time      `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time      `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 type UserState struct {
-	UserID    int64  `gorm:"primaryKey"`
-	ChatID    int64  `gorm:"not null"`
-	Action    string `gorm:"not null"`
-	Metadata  string `json:"metadata" gorm:"type:text"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UserID    int64     `gorm:"primaryKey" json:"user_id"`
+	ChatID    int64     `gorm:"not null" json:"chat_id"`
+	Action    string    `gorm:"not null" json:"action"`
+	Metadata  string    `gorm:"type:text" json:"metadata"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
+
 type Mute struct {
-	ID        uint      `gorm:"primaryKey"`
-	ChatID    int64     `gorm:"index"`
-	UserID    int64     `gorm:"index"`
-	UserName  string    `gorm:"size:255"`
-	ExpiresAt time.Time `gorm:"index"`
+	ChatID    int64     `gorm:"primaryKey" json:"chat_id"`
+	UserID    int64     `gorm:"primaryKey" json:"user_id"`
+	UserName  string    `gorm:"size:255" json:"user_name"`
+	ExpiresAt time.Time `gorm:"index" json:"expires_at"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
+
 type LinkToken struct {
-	Token     string    `gorm:"primaryKey"`
-	UserID    int64     `gorm:"index"`
-	ExpiresAt time.Time `gorm:"index"`
+	Token     string    `gorm:"primaryKey" json:"token"`
+	UserID    int64     `gorm:"index" json:"user_id"`
+	ExpiresAt time.Time `gorm:"index" json:"expires_at"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
+
 type ChatAdmin struct {
-	ID        uint  `gorm:"primaryKey"`
-	ChatID    int64 `gorm:"index:idx_chat_user,unique"`
-	UserID    int64 `gorm:"index:idx_chat_user,unique"`
-	CreatedAt time.Time
+	ChatID    int64     `gorm:"primaryKey" json:"chat_id"`
+	UserID    int64     `gorm:"primaryKey" json:"user_id"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
 type ChatStats struct {
-	ChatID          int64     `gorm:"primaryKey;autoIncrement:false"`
-	Date            time.Time `gorm:"primaryKey;type:date"`
-	WordViolations  int64     `gorm:"default:0"`
-	LinkViolations  int64     `gorm:"default:0"`
-	ImageViolations int64     `gorm:"default:0"`
-	VideoViolations int64     `gorm:"default:0"`
-	AudioViolations int64     `gorm:"default:0"`
-	FileViolations  int64     `gorm:"default:0"`
-	MuteCount       int64     `gorm:"default:0"`
+	ChatID          int64     `gorm:"primaryKey" json:"chat_id"`
+	Date            time.Time `gorm:"primaryKey;type:date" json:"date"`
+	WordViolations  int64     `gorm:"default:0" json:"word_violations"`
+	LinkViolations  int64     `gorm:"default:0" json:"link_violations"`
+	ImageViolations int64     `gorm:"default:0" json:"image_violations"`
+	VideoViolations int64     `gorm:"default:0" json:"video_violations"`
+	AudioViolations int64     `gorm:"default:0" json:"audio_violations"`
+	FileViolations  int64     `gorm:"default:0" json:"file_violations"`
+	MuteCount       int64     `gorm:"default:0" json:"mute_count"`
+	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
-// ChatInfo представляет информацию о чате для отображения в UI
+
 type ChatInfo struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`

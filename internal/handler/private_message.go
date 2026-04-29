@@ -407,10 +407,11 @@ func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
-	
+	kb.AddRow().AddCallback(messages.BtnMonitoring, schemes.DEFAULT, "monitoring_stats")
+
 	// ✅ НОВАЯ КНОПКА: Выбор чатов для рассылки
 	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
-	
+
 	// Кнопка общей рассылки
 	kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
 
@@ -427,7 +428,7 @@ func (h *Handler) sendMainMenu(ctx context.Context, userID int64) {
 // ✅ НОВАЯ ФУНКЦИЯ: Обработчик команды /getchats с названиями чатов
 func (h *Handler) handleGetChatsCommand(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
 	userID := upd.Message.Sender.UserId
-	
+
 	// ✅ Получаем чаты с названиями
 	chatInfos, err := h.svc.GetManagedChatsWithNames(ctx, userID)
 	if err != nil {
@@ -444,7 +445,7 @@ func (h *Handler) handleGetChatsCommand(ctx context.Context, upd *schemes.Messag
 	// Формируем список чатов с названиями и ID
 	var list strings.Builder
 	list.WriteString(messages.MsgGetChatsTitle)
-	
+
 	for i, chat := range chatInfos {
 		// Показываем название + ID в скобках
 		chatLabel := chat.Name
@@ -453,7 +454,7 @@ func (h *Handler) handleGetChatsCommand(ctx context.Context, upd *schemes.Messag
 		}
 		list.WriteString(fmt.Sprintf("%d. **%s** (ID: `%d`)\n", i+1, chatLabel, chat.ID))
 	}
-	
+
 	list.WriteString("\n_Используйте эти ID для рассылки через `/broadcast ID1,ID2 текст`_")
 
 	h.sendText(ctx, userID, list.String())

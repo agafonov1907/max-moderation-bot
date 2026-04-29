@@ -2,11 +2,10 @@ package repository
 
 import (
 	"context"
-	"log/slog"
-	"time"
-
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"log/slog"
+	"time"
 )
 
 type ViolationRepository interface {
@@ -21,11 +20,11 @@ type PostgresViolationRepository struct {
 }
 
 type UserViolation struct {
-	ID            int64     `gorm:"primaryKey"`
-	ChatID        int64     `gorm:"not null;index:idx_user_violations_chat_user_created,priority:1"`
-	UserID        int64     `gorm:"not null;index:idx_user_violations_chat_user_created,priority:2"`
-	ViolationType string    `gorm:"size:50"`
-	CreatedAt     time.Time `gorm:"not null;default:now();index:idx_user_violations_chat_user_created,priority:3"`
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	ChatID        int64     `gorm:"not null;index:idx_user_violations_chat_user_created,priority:1" json:"chat_id"`
+	UserID        int64     `gorm:"not null;index:idx_user_violations_chat_user_created,priority:2" json:"user_id"`
+	ViolationType string    `gorm:"size:50" json:"violation_type"`
+	CreatedAt     time.Time `gorm:"not null;default:now();index:idx_user_violations_chat_user_created,priority:3" json:"created_at"`
 }
 
 func NewViolationRepository(db *gorm.DB) ViolationRepository {
@@ -53,6 +52,7 @@ func (r *PostgresViolationRepository) CountViolationsSince(ctx context.Context, 
 func (r *PostgresViolationRepository) IncrementChatStat(ctx context.Context, chatID int64, field string) error {
 	slog.Debug("Incrementing chat stat", "chat_id", chatID, "field", field)
 	now := time.Now().Truncate(24 * time.Hour)
+
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "chat_id"}, {Name: "date"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
@@ -61,48 +61,6 @@ func (r *PostgresViolationRepository) IncrementChatStat(ctx context.Context, cha
 	}).Create(&ChatStats{
 		ChatID: chatID,
 		Date:   now,
-		WordViolations: func() int64 {
-			if field == "word_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		LinkViolations: func() int64 {
-			if field == "link_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		ImageViolations: func() int64 {
-			if field == "image_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		VideoViolations: func() int64 {
-			if field == "video_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		AudioViolations: func() int64 {
-			if field == "audio_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		FileViolations: func() int64 {
-			if field == "file_violations" {
-				return 1
-			}
-			return 0
-		}(),
-		MuteCount: func() int64 {
-			if field == "mute_count" {
-				return 1
-			}
-			return 0
-		}(),
 	}).Error
 }
 

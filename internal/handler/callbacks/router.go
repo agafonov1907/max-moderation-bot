@@ -9,10 +9,8 @@ import (
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
 	"github.com/max-messenger/max-bot-api-client-go/schemes"
 	"go.opentelemetry.io/otel/attribute"
-	//"go.opentelemetry.io/otel/trace"
 )
 
-// Handle обрабатывает callback-обновления от MAX Bot API
 func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallbackUpdate) {
 	payload := upd.Callback.Payload
 	chatID := upd.Callback.GetChatID()
@@ -36,7 +34,6 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		"user_id", userID,
 	)
 
-	// Удаляем сообщение с клавиатурой после нажатия (чтобы не засорять чат)
 	if upd.Message != nil && upd.Message.Body.Mid != "" {
 		go func() {
 			bgCtx := context.Background()
@@ -46,7 +43,6 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		}()
 	}
 
-	// Роутинг по payload
 	switch {
 	case payload == "add_group":
 		h.handleAddGroup(ctx, userID)
@@ -60,77 +56,39 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		}
 
 	case payload == "main_menu":
-		h.sendMainMenu(ctx, userID)
+		h.SendMainMenu(ctx, userID)
+		return
+
+	case payload == "monitoring_stats":
+		h.handleMonitoringStats(ctx, userID)
+		return
+
+	case payload == "monitoring_refresh_cache":
+		h.handleMonitoringRefreshCache(ctx, userID)
+		return
+
+	case payload == "monitoring_export":
+		h.handleMonitoringExport(ctx, userID)
+		return
+
+	case payload == "monitoring_activity":
+		h.handleMonitoringActivity(ctx, userID)
+		return
 
 	case strings.HasPrefix(payload, "manage_"):
 		var groupID int64
 		if _, err := fmt.Sscanf(payload, "manage_%d", &groupID); err == nil {
 			h.HandleManageGroup(ctx, groupID, userID)
-		} else {
-			h.logger.Error("Invalid manage payload", "payload", payload)
 		}
 
 	case strings.HasPrefix(payload, "toggle_"):
 		h.handleToggleSetting(ctx, payload, userID)
 
-	case strings.HasPrefix(payload, "prompt_words_"):
-		h.handlePromptInput(ctx, payload, userID, "add_words")
-
-	case strings.HasPrefix(payload, "prompt_domains_"):
-		h.handlePromptInput(ctx, payload, userID, "add_domains")
-
-	case strings.HasPrefix(payload, "prompt_import_words_"):
-		h.handlePromptInput(ctx, payload, userID, "import_words")
-
-	case strings.HasPrefix(payload, "clear_words_"):
-		h.handleClearBlocked(ctx, payload, userID, "clear_words")
-
-	case strings.HasPrefix(payload, "clear_domains_"):
-		h.handleClearBlocked(ctx, payload, userID, "clear_domains")
-
-	case strings.HasPrefix(payload, "lm_"):
-		var groupID int64
-		var page int
-		if _, err := fmt.Sscanf(payload, "lm_%d_%d", &groupID, &page); err == nil {
-			h.handleListMutes(ctx, groupID, userID, page)
-		} else if _, err := fmt.Sscanf(payload, "lm_%d", &groupID); err == nil {
-			h.handleListMutes(ctx, groupID, userID, 1)
-		}
-
-	case strings.HasPrefix(payload, "um_"):
-		var groupID, targetUserID int64
-		var page int
-		if _, err := fmt.Sscanf(payload, "um_%d_%d_%d", &groupID, &targetUserID, &page); err == nil {
-			h.handleUnmute(ctx, groupID, userID, targetUserID, page)
-		}
-
-	case strings.HasPrefix(payload, "vm_"):
-		var groupID, targetUserID int64
-		var page int
-		if _, err := fmt.Sscanf(payload, "vm_%d_%d_%d", &groupID, &targetUserID, &page); err == nil {
-			h.handleViewMute(ctx, groupID, userID, targetUserID, page)
-		}
-
-	case strings.HasPrefix(payload, "stats_"):
-		var groupID int64
-		if _, err := fmt.Sscanf(payload, "stats_%d", &groupID); err == nil {
-			h.handleViewStats(ctx, groupID, userID)
-		}
-
-	// === РАССЫЛКА ===
-	case payload == "broadcast_start":
-		// ✅ Вызываем обновлённую функцию с экраном подтверждения
+	case strings.HasPrefix(payload, "broadcast_start"):
 		h.handleBroadcastStart(ctx, userID)
 		return
 
-	// ✅ НОВЫЙ КЕЙС: Финальное подтверждение для рассылки во все чаты
-	case payload == "broadcast_start_final":
-		// Переход к вводу текста для рассылки во все чаты
-		h.handleBroadcastStartFinal(ctx, userID)
-		return
-
 	case payload == "broadcast_cancel":
-		// Отмена рассылки
 		if err := h.userStateRepo.ClearState(userID); err != nil {
 			h.logger.Error("Failed to clear broadcast state", "error", err)
 		}
@@ -142,14 +100,11 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		}
 		return
 
-	// === ВЫБОР ЧАТОВ ДЛЯ РАССЫЛКИ ===
 	case payload == "broadcast_select_chats":
-		// Показать список чатов с чекбоксами (начинаем с первой страницы)
 		h.handleBroadcastSelectChats(ctx, userID, 1)
 		return
 
 	case strings.HasPrefix(payload, "broadcast_toggle_chat_"):
-		// Переключить выбор чата
 		var chatID int64
 		if _, err := fmt.Sscanf(payload, "broadcast_toggle_chat_%d", &chatID); err == nil {
 			h.handleBroadcastToggleChat(ctx, userID, chatID)
@@ -157,28 +112,14 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		return
 
 	case payload == "broadcast_confirm_chats":
-		// Показать экран подтверждения перед рассылкой
 		h.handleBroadcastConfirmChats(ctx, userID)
 		return
 
-	case payload == "broadcast_confirm_final":
-		// ✅ Финальное подтверждение → переход к вводу текста
-		h.handleBroadcastFinalConfirm(ctx, userID)
-		return
-
-	case payload == "broadcast_clear_selection":
-		// Очистить выбор чатов
-		h.handleBroadcastClearSelection(ctx, userID)
-		return
-
-	// === ПАГИНАЦИЯ ВЫБОРА ЧАТОВ ===
 	case payload == "broadcast_prev_page":
-		// Перейти на предыдущую страницу
 		h.handleBroadcastPrevPage(ctx, userID)
 		return
 
 	case payload == "broadcast_next_page":
-		// Перейти на следующую страницу
 		h.handleBroadcastNextPage(ctx, userID)
 		return
 
@@ -187,16 +128,15 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 	}
 }
 
-// sendMainMenu отправляет главное меню администратора
-func (h *CallbackHandler) sendMainMenu(ctx context.Context, userID int64) {
+func (h *CallbackHandler) SendMainMenu(ctx context.Context, userID int64) {
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
 
-	// ✅ НОВАЯ КНОПКА: Выбор чатов для рассылки
-	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
+	// ✅ ИСПРАВЛЕНО: schemes.PRIMARY → schemes.DEFAULT
+	kb.AddRow().AddCallback(messages.BtnMonitoring, schemes.DEFAULT, "monitoring_stats")
 
-	// Кнопка общей рассылки
+	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")
 	kb.AddRow().AddCallback(messages.BtnBroadcast, schemes.NEGATIVE, "broadcast_start")
 
 	msg := maxbot.NewMessage()

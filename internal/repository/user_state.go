@@ -10,7 +10,7 @@ import (
 
 type UserStateRepository interface {
 	SetState(userID, chatID int64, action string) error
-	SetStateWithMetadata(userID, chatID int64, action, metadata string) error // ✅ Новый метод
+	SetStateWithMetadata(userID, chatID int64, action, metadata string) error
 	GetState(userID int64) (*UserState, error)
 	ClearState(userID int64) error
 }
@@ -30,7 +30,7 @@ func (r *PostgresUserStateRepository) SetState(userID, chatID int64, action stri
 		UserID:    userID,
 		ChatID:    chatID,
 		Action:    action,
-		Metadata:  "", // Пустая метаданные
+		Metadata:  "",
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -41,14 +41,14 @@ func (r *PostgresUserStateRepository) SetState(userID, chatID int64, action stri
 	return nil
 }
 
-// ✅ SetStateWithMetadata устанавливает состояние пользователя с метаданными
+// SetStateWithMetadata устанавливает состояние пользователя с метаданными
 func (r *PostgresUserStateRepository) SetStateWithMetadata(userID, chatID int64, action, metadata string) error {
 	now := time.Now()
 	state := UserState{
 		UserID:    userID,
 		ChatID:    chatID,
 		Action:    action,
-		Metadata:  metadata, // ✅ Сохраняем метаданные (например, "123,456,789")
+		Metadata:  metadata,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -65,7 +65,7 @@ func (r *PostgresUserStateRepository) GetState(userID int64) (*UserState, error)
 	err := r.db.Where("user_id = ?", userID).First(&state).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil // Нет состояния — это нормально
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get user state: %w", err)
 	}

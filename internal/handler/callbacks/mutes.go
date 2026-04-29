@@ -131,13 +131,3 @@ func (h *CallbackHandler) handleUnmute(ctx context.Context, chatID int64, adminI
 	h.sendText(ctx, adminID, fmt.Sprintf(messages.MsgUnmutedSuccess, targetUserID))
 	h.handleListMutes(ctx, chatID, adminID, page)
 }
-
-func (h *CallbackHandler) sendText(ctx context.Context, userID int64, text string) {
-	msg := maxbot.NewMessage()
-	msg.SetUser(userID)
-	msg.SetText(text)
-	msg.SetFormat("markdown")
-	if err := h.bot.Messages.Send(ctx, msg); err != nil {
-		h.logger.Error("Failed to send text message", "error", err)
-	}
-}

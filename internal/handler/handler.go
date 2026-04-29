@@ -29,6 +29,8 @@ type Handler struct {
 	config          *config.Config
 	callbackHandler *callbacks.CallbackHandler
 	broadcastSvc    *broadcast.Service
+	statsRepo       *repository.PostgresRepository // ✅ Для мониторинга
+	settingsRepo    repository.SettingsRepository  // ✅ Для настроек чатов
 }
 
 func NewHandler(
@@ -38,15 +40,19 @@ func NewHandler(
 	userStateRepo repository.UserStateRepository,
 	cfg *config.Config,
 	broadcastSvc *broadcast.Service,
+	statsRepo *repository.PostgresRepository, // ✅ 7-й параметр
+	settingsRepo repository.SettingsRepository, // ✅ 8-й параметр
 ) *Handler {
 	return &Handler{
-		logger:          logger,
-		svc:             svc,
-		bot:             bot,
-		userStateRepo:   userStateRepo,
-		tracer:          otel.Tracer("handler"),
-		config:          cfg,
-		broadcastSvc:    broadcastSvc,
+		logger:        logger,
+		svc:           svc,
+		bot:           bot,
+		userStateRepo: userStateRepo,
+		tracer:        otel.Tracer("handler"),
+		config:        cfg,
+		broadcastSvc:  broadcastSvc,
+		statsRepo:     statsRepo,    // ✅ Инициализация
+		settingsRepo:  settingsRepo, // ✅ Инициализация
 		callbackHandler: callbacks.NewCallbackHandler(
 			logger,
 			svc,
@@ -54,6 +60,8 @@ func NewHandler(
 			bot,
 			userStateRepo,
 			otel.Tracer("callbacks"),
+			statsRepo,    // ✅ 7-й аргумент
+			settingsRepo, // ✅ 8-й аргумент
 		),
 	}
 }

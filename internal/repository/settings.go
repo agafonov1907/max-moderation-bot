@@ -3,10 +3,9 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"sync"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type SettingsRepository interface {
@@ -45,6 +44,7 @@ func (r *CachedSettingsRepository) GetSettings(chatID int64) (*ChatSettings, err
 			r.cache.Delete(chatID)
 		}
 	}
+
 	var settings ChatSettings
 	err := r.db.First(&settings, "chat_id = ?", chatID).Error
 	if err != nil {
@@ -62,17 +62,18 @@ func (r *CachedSettingsRepository) GetSettings(chatID int64) (*ChatSettings, err
 		}
 		return nil, fmt.Errorf("failed to get settings: %w", err)
 	}
+
 	if r.enableCache {
 		r.cache.Store(chatID, &cachedSettings{
 			settings:  &settings,
 			expiresAt: time.Now().Add(cacheTTL),
 		})
 	}
+
 	return &settings, nil
 }
 
 func (r *CachedSettingsRepository) InitSettings(chatID int64) error {
-
 	settings := ChatSettings{
 		ChatID:           chatID,
 		EnableWordFilter: true,

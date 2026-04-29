@@ -21,9 +21,9 @@ type Config struct {
 	DBName      string `env:"DB_NAME,required"`
 	EnableCache bool   `env:"ENABLE_CACHE" envDefault:"false"`
 
-	DefaultMuteDuration    string `env:"DEFAULT_MUTE_DURATION" envDefault:"30m"`
-	EnableTelemetry        bool   `env:"ENABLE_TELEMETRY" envDefault:"true"`
-	GroupLinkedSuccessText string `env:"GROUP_LINKED_SUCCESS_TEXT" envDefault:""`
+	DefaultMuteDuration    string  `env:"DEFAULT_MUTE_DURATION" envDefault:"30m"`
+	EnableTelemetry        bool    `env:"ENABLE_TELEMETRY" envDefault:"true"`
+	GroupLinkedSuccessText string  `env:"GROUP_LINKED_SUCCESS_TEXT" envDefault:""`
 	AdminUserIDs           []int64 `env:"ADMIN_USER_IDS" envSeparator:","`
 }
 

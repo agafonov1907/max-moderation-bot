@@ -59,7 +59,7 @@ func (h *CallbackHandler) handleBroadcastCancel(ctx context.Context, userID int6
 	msg.SetText("❌ Рассылка отменена.")
 	msg.SetFormat("markdown")
 
-	// Добавляем кнопку возврата в главное меню
+	// ✅ Добавляем кнопку возврата в главное меню
 	kb := h.bot.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddCallback("🔙 В меню", schemes.DEFAULT, "main_menu")
 	msg.AddKeyboard(kb)
@@ -123,7 +123,6 @@ func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID
 					}
 				}
 			}
-			// ✅ ИСПРАВЛЕНО: не парсим page: из Metadata — используем параметр page из функции
 		}
 	}
 

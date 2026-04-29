@@ -22,14 +22,28 @@ func NewPostgresDB(dsn string) (*gorm.DB, error) {
 			Colorful:                  true,
 		},
 	)
+
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: newLogger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	if err := db.AutoMigrate(&ChatSettings{}, &Mute{}, &LinkToken{}, &ChatAdmin{}, &UserState{}, &UserViolation{}, &ChatStats{}); err != nil {
+
+	// ✅ AutoMigrate создаст/обновит таблицы в БД
+	// Добавлен &ChatMemberCache{} для поддержки кэша участников
+	if err := db.AutoMigrate(
+		&ChatSettings{},
+		&Mute{},
+		&LinkToken{},
+		&ChatAdmin{},
+		&UserState{},
+		&UserViolation{},
+		&ChatStats{},
+		&ChatMemberCache{}, // ✅ НОВАЯ СТРОКА: миграция таблицы кэша
+	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
+
 	return db, nil
 }

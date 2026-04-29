@@ -34,16 +34,21 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		"user_id", userID,
 	)
 
+	// ✅ УНИВЕРСАЛЬНОЕ УДАЛЕНИЕ СООБЩЕНИЯ С КНОПКОЙ (с улучшенным логом)
 	if upd.Message != nil && upd.Message.Body.Mid != "" {
 		go func() {
 			bgCtx := context.Background()
-			if _, err := h.bot.Messages.DeleteMessage(bgCtx, upd.Message.Body.Mid); err != nil {
-				h.logger.Warn("Failed to delete callback message", "error", err)
+			mid := upd.Message.Body.Mid
+			if _, err := h.bot.Messages.DeleteMessage(bgCtx, mid); err != nil {
+				h.logger.Warn("❌ Failed to delete callback message", "error", err, "mid", mid)
+			} else {
+				h.logger.Info("✅ Deleted callback message", "mid", mid)
 			}
 		}()
 	}
 
 	switch {
+	// === ОБЩИЕ КЕЙСЫ ===
 	case payload == "add_group":
 		h.handleAddGroup(ctx, userID)
 
@@ -84,10 +89,23 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 	case strings.HasPrefix(payload, "toggle_"):
 		h.handleToggleSetting(ctx, payload, userID)
 
-	case strings.HasPrefix(payload, "broadcast_start"):
-		h.handleBroadcastStart(ctx, userID)
+	// === РАССЫЛКА: ТОЧНЫЕ СОВПАДЕНИЯ (ДОЛЖНЫ БЫТЬ ПЕРЕД HASPREFIX!) ===
+
+	// ✅ broadcast_start_final — финальное подтверждение рассылки во ВСЕ чаты
+	// Должно быть ВЫШЕ, чем strings.HasPrefix("broadcast_start")
+	case payload == "broadcast_start_final":
+		h.logger.Info("🔍 DEBUG: broadcast_start_final HIT", "user_id", userID)
+		h.handleBroadcastStartFinal(ctx, userID)
 		return
 
+	// ✅ broadcast_confirm_final — финальное подтверждение рассылки в ВЫБРАННЫЕ чаты
+	// Должно быть ВЫШЕ, чем strings.HasPrefix("broadcast_confirm_") (если бы был такой)
+	case payload == "broadcast_confirm_final":
+		h.logger.Info("🔍 DEBUG: broadcast_confirm_final HIT", "user_id", userID)
+		h.handleBroadcastFinalConfirm(ctx, userID)
+		return
+
+	// ✅ broadcast_cancel — отмена рассылки
 	case payload == "broadcast_cancel":
 		if err := h.userStateRepo.ClearState(userID); err != nil {
 			h.logger.Error("Failed to clear broadcast state", "error", err)
@@ -100,21 +118,34 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		}
 		return
 
+	// ✅ broadcast_select_chats — выбор чатов для рассылки
 	case payload == "broadcast_select_chats":
 		h.handleBroadcastSelectChats(ctx, userID, 1)
 		return
 
-	case strings.HasPrefix(payload, "broadcast_toggle_chat_"):
-		var chatID int64
-		if _, err := fmt.Sscanf(payload, "broadcast_toggle_chat_%d", &chatID); err == nil {
-			h.handleBroadcastToggleChat(ctx, userID, chatID)
-		}
-		return
-
+	// ✅ broadcast_confirm_chats — подтверждение выбранных чатов
 	case payload == "broadcast_confirm_chats":
+		h.logger.Info("🔍 DEBUG: broadcast_confirm_chats HIT", "user_id", userID)
 		h.handleBroadcastConfirmChats(ctx, userID)
 		return
 
+	// ✅ broadcast_send_all — альтернатива: сразу во все чаты
+	case payload == "broadcast_send_all":
+		_ = h.userStateRepo.SetState(userID, 0, "broadcast_wait_text")
+		h.sendText(ctx, userID, "✍️ Введите текст рассылки во все чаты...")
+		return
+
+	// ✅ broadcast_clear_selection — очистка выбора чатов
+	case payload == "broadcast_clear_selection":
+		_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_selected_chats", "selected:;page:1")
+		h.handleBroadcastSelectChats(ctx, userID, 1)
+		return
+
+	// ✅ broadcast_page_info — информационная кнопка (заглушка)
+	case payload == "broadcast_page_info":
+		return
+
+	// ✅ broadcast_prev_page / broadcast_next_page — пагинация
 	case payload == "broadcast_prev_page":
 		h.handleBroadcastPrevPage(ctx, userID)
 		return
@@ -123,8 +154,25 @@ func (h *CallbackHandler) Handle(ctx context.Context, upd *schemes.MessageCallba
 		h.handleBroadcastNextPage(ctx, userID)
 		return
 
+	// === РАССЫЛКА: HASPREFIX (ДОЛЖНЫ БЫТЬ ПОСЛЕ ТОЧНЫХ СОВПАДЕНИЙ!) ===
+
+	// ⚠️ Этот кейс теперь НЕ перехватит "broadcast_start_final",
+	// потому что точный кейс выше уже обработал его и сделал `return`
+	case strings.HasPrefix(payload, "broadcast_start"):
+		h.handleBroadcastStart(ctx, userID)
+		return
+
+	// ⚠️ Аналогично: этот кейс не перехватит точные совпадения выше
+	case strings.HasPrefix(payload, "broadcast_toggle_chat_"):
+		var chatID int64
+		if _, err := fmt.Sscanf(payload, "broadcast_toggle_chat_%d", &chatID); err == nil {
+			h.handleBroadcastToggleChat(ctx, userID, chatID)
+		}
+		return
+
+	// === НЕИЗВЕСТНЫЕ PAYLOAD ===
 	default:
-		h.logger.Warn("Unknown callback payload", "payload", payload)
+		h.logger.Warn("⚠️ Unknown callback payload", "payload", payload)
 	}
 }
 
@@ -133,7 +181,7 @@ func (h *CallbackHandler) SendMainMenu(ctx context.Context, userID int64) {
 	kb.AddRow().AddCallback(messages.BtnMyGroups, schemes.DEFAULT, "my_groups")
 	kb.AddRow().AddCallback(messages.BtnAddGroup, schemes.POSITIVE, "add_group")
 
-	// ✅ ИСПРАВЛЕНО: schemes.PRIMARY → schemes.DEFAULT
+	// ✅ Кнопка "Мониторинг" с правильной константой
 	kb.AddRow().AddCallback(messages.BtnMonitoring, schemes.DEFAULT, "monitoring_stats")
 
 	kb.AddRow().AddCallback(messages.BtnBroadcastSelectChats, schemes.DEFAULT, "broadcast_select_chats")

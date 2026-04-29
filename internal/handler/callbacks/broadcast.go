@@ -16,12 +16,18 @@ const broadcastChatsPerPage = 10
 
 // handleBroadcastStart — показывает экран подтверждения перед рассылкой во все чаты
 func (h *CallbackHandler) handleBroadcastStart(ctx context.Context, userID int64) {
+	// 🔍 ЛОГ: начало функции
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastStart", "user_id", userID)
+
 	// Получаем количество чатов для информирования
 	chatInfos, err := h.svc.GetManagedChatsWithNames(ctx, userID)
 	chatCount := 0
 	if err == nil {
 		chatCount = len(chatInfos)
 	}
+
+	// 🔍 ЛОГ: сколько чатов найдено
+	h.logger.Info("🔍 DEBUG [broadcast.go]: Found managed chats", "user_id", userID, "count", chatCount)
 
 	// ✅ Показываем экран подтверждения
 	msg := maxbot.NewMessage()
@@ -39,16 +45,23 @@ func (h *CallbackHandler) handleBroadcastStart(ctx context.Context, userID int64
 		AddCallback("❌ Отмена", schemes.NEGATIVE, "broadcast_cancel")
 	msg.AddKeyboard(kb)
 
+	// 🔍 ЛОГ: сохраняем состояние
+	h.logger.Info("🔍 DEBUG [broadcast.go]: Setting state to broadcast_wait_confirm_all", "user_id", userID)
+
 	// Сохраняем состояние ожидания финального подтверждения
 	_ = h.userStateRepo.SetState(userID, 0, "broadcast_wait_confirm_all")
 
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send confirm prompt", "error", err)
+	} else {
+		h.logger.Info("✅ DEBUG [broadcast.go]: Confirm prompt sent", "user_id", userID)
 	}
 }
 
 // handleBroadcastCancel отменяет рассылку и возвращает в меню
 func (h *CallbackHandler) handleBroadcastCancel(ctx context.Context, userID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastCancel", "user_id", userID)
+
 	if err := h.userStateRepo.ClearState(userID); err != nil {
 		h.logger.Error("Failed to clear state", "error", err)
 	}
@@ -71,6 +84,8 @@ func (h *CallbackHandler) handleBroadcastCancel(ctx context.Context, userID int6
 
 // handleBroadcastSelectChats — показывает список чатов с чекбоксами, названиями и пагинацией
 func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID int64, page int) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastSelectChats", "user_id", userID, "page", page)
+
 	if page < 1 {
 		page = 1
 	}
@@ -209,6 +224,8 @@ func (h *CallbackHandler) handleBroadcastSelectChats(ctx context.Context, userID
 
 // handleBroadcastToggleChat — переключает выбор чата (сохраняет текущую страницу)
 func (h *CallbackHandler) handleBroadcastToggleChat(ctx context.Context, userID, chatID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastToggleChat", "user_id", userID, "chat_id", chatID)
+
 	state, _ := h.userStateRepo.GetState(userID)
 
 	// Парсим текущее состояние
@@ -237,10 +254,13 @@ func (h *CallbackHandler) handleBroadcastToggleChat(ctx context.Context, userID,
 	}
 
 	// Переключаем чат
-	if selectedChats[chatID] {
+	wasSelected := selectedChats[chatID]
+	if wasSelected {
 		delete(selectedChats, chatID)
+		h.logger.Info("🔍 DEBUG [broadcast.go]: Deselected chat", "chat_id", chatID)
 	} else {
 		selectedChats[chatID] = true
+		h.logger.Info("🔍 DEBUG [broadcast.go]: Selected chat", "chat_id", chatID)
 	}
 
 	// Сохраняем обратно в состояние (с текущей страницей)
@@ -257,8 +277,16 @@ func (h *CallbackHandler) handleBroadcastToggleChat(ctx context.Context, userID,
 
 // handleBroadcastConfirmChats — показывает экран подтверждения перед рассылкой
 func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastConfirmChats START", "user_id", userID)
+
 	state, _ := h.userStateRepo.GetState(userID)
 	if state == nil || state.Action != "broadcast_selected_chats" || state.Metadata == "" {
+		h.logger.Warn("⚠️ DEBUG [broadcast.go]: Invalid state for confirm", "user_id", userID, "action", func() string {
+			if state != nil {
+				return state.Action
+			}
+			return "nil"
+		}())
 		h.sendText(ctx, userID, messages.MsgBroadcastNoChatsSelected)
 		return
 	}
@@ -275,6 +303,8 @@ func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userI
 			break
 		}
 	}
+
+	h.logger.Info("🔍 DEBUG [broadcast.go]: Parsed selected chats", "user_id", userID, "count", len(selectedIDs))
 
 	if len(selectedIDs) == 0 {
 		h.sendText(ctx, userID, messages.MsgBroadcastNoChatsSelected)
@@ -301,14 +331,19 @@ func (h *CallbackHandler) handleBroadcastConfirmChats(ctx context.Context, userI
 
 	// Сохраняем состояние ожидания финального подтверждения
 	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_confirm", state.Metadata)
+	h.logger.Info("✅ DEBUG [broadcast.go]: State set to broadcast_wait_confirm", "user_id", userID)
 
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send confirm prompt", "error", err)
+	} else {
+		h.logger.Info("✅ DEBUG [broadcast.go]: Confirm prompt sent", "user_id", userID)
 	}
 }
 
 // handleBroadcastClearSelection — очищает выбор чатов (сохраняет текущую страницу)
 func (h *CallbackHandler) handleBroadcastClearSelection(ctx context.Context, userID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastClearSelection", "user_id", userID)
+
 	state, _ := h.userStateRepo.GetState(userID)
 	currentPage := 1
 
@@ -392,8 +427,25 @@ func (h *CallbackHandler) handleBroadcastNextPage(ctx context.Context, userID in
 
 // handleBroadcastFinalConfirm — финальное подтверждение, переход к вводу текста (для выбранных чатов)
 func (h *CallbackHandler) handleBroadcastFinalConfirm(ctx context.Context, userID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastFinalConfirm START", "user_id", userID)
+
 	state, _ := h.userStateRepo.GetState(userID)
+
+	// 🔍 ЛОГ: проверка состояния
+	h.logger.Info("🔍 DEBUG [broadcast.go]: State check",
+		"user_id", userID,
+		"state_exists", state != nil,
+		"current_action", func() string {
+			if state != nil {
+				return state.Action
+			}
+			return "nil"
+		}(),
+		"expected_action", "broadcast_wait_confirm",
+	)
+
 	if state == nil || state.Action != "broadcast_wait_confirm" || state.Metadata == "" {
+		h.logger.Warn("⚠️ Session expired or no chats selected", "user_id", userID)
 		h.sendText(ctx, userID, "❌ Сессия истекла. Начните заново через /start")
 		return
 	}
@@ -411,6 +463,8 @@ func (h *CallbackHandler) handleBroadcastFinalConfirm(ctx context.Context, userI
 		}
 	}
 
+	h.logger.Info("🔍 DEBUG [broadcast.go]: Selected chats count", "user_id", userID, "count", len(selectedIDs))
+
 	if len(selectedIDs) == 0 {
 		h.sendText(ctx, userID, messages.MsgBroadcastNoChatsSelected)
 		return
@@ -418,7 +472,12 @@ func (h *CallbackHandler) handleBroadcastFinalConfirm(ctx context.Context, userI
 
 	// Переходим к состоянию ожидания текста
 	selectedChatsStr := strings.Join(selectedIDs, ",")
+	h.logger.Info("✅ DEBUG [broadcast.go]: Setting state to broadcast_wait_text_with_chats",
+		"user_id", userID, "chats", selectedChatsStr)
+
 	_ = h.userStateRepo.SetStateWithMetadata(userID, 0, "broadcast_wait_text_with_chats", selectedChatsStr)
+
+	h.logger.Info("✅ DEBUG [broadcast.go]: Sending text prompt for selected chats", "user_id", userID)
 
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
@@ -434,19 +493,50 @@ func (h *CallbackHandler) handleBroadcastFinalConfirm(ctx context.Context, userI
 
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send text prompt", "error", err)
+	} else {
+		h.logger.Info("✅ DEBUG [broadcast.go]: Text prompt sent successfully", "user_id", userID)
 	}
 }
 
 // ✅ НОВАЯ ФУНКЦИЯ: Финальное подтверждение для рассылки во все чаты
 func (h *CallbackHandler) handleBroadcastStartFinal(ctx context.Context, userID int64) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: handleBroadcastStartFinal START", "user_id", userID)
+
 	state, _ := h.userStateRepo.GetState(userID)
+
+	// 🔍 ЛОГ: проверка состояния
+	h.logger.Info("🔍 DEBUG [broadcast.go]: State check in handleBroadcastStartFinal",
+		"user_id", userID,
+		"state_exists", state != nil,
+		"current_action", func() string {
+			if state != nil {
+				return state.Action
+			}
+			return "nil"
+		}(),
+		"expected_action", "broadcast_wait_confirm_all",
+	)
+
 	if state == nil || state.Action != "broadcast_wait_confirm_all" {
+		h.logger.Warn("⚠️ Session expired or wrong state", "user_id", userID, "action", func() string {
+			if state != nil {
+				return state.Action
+			}
+			return "nil"
+		}())
 		h.sendText(ctx, userID, "❌ Сессия истекла. Начните заново через /start")
 		return
 	}
 
-	// Переходим к состоянию ожидания текста (для всех чатов)
+	// 🔍 ЛОГ: переключаем состояние
+	h.logger.Info("✅ DEBUG [broadcast.go]: Setting state to broadcast_wait_text", "user_id", userID)
+
+	// ✅ КРИТИЧНО: Переходим к состоянию ожидания текста (для всех чатов)
+	// chatID=0, потому что рассылка во ВСЕ чаты, не в конкретный
 	_ = h.userStateRepo.SetState(userID, 0, "broadcast_wait_text")
+
+	// 🔍 ЛОГ: отправляем запрос на ввод текста
+	h.logger.Info("✅ DEBUG [broadcast.go]: Sending text prompt to user", "user_id", userID)
 
 	msg := maxbot.NewMessage()
 	msg.SetUser(userID)
@@ -462,11 +552,15 @@ func (h *CallbackHandler) handleBroadcastStartFinal(ctx context.Context, userID 
 
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
 		h.logger.Error("Failed to send text prompt", "error", err)
+	} else {
+		h.logger.Info("✅ DEBUG [broadcast.go]: Text prompt sent successfully", "user_id", userID)
 	}
 }
 
 // ProcessBroadcastInput обрабатывает введенный текст для рассылки
 func (h *CallbackHandler) ProcessBroadcastInput(ctx context.Context, userID int64, text string) {
+	h.logger.Info("🔍 DEBUG [broadcast.go]: ProcessBroadcastInput START", "user_id", userID, "text_len", len(text))
+
 	if err := h.userStateRepo.ClearState(userID); err != nil {
 		h.logger.Error("Failed to clear state before broadcast", "error", err)
 	}
@@ -501,6 +595,8 @@ func (h *CallbackHandler) ProcessBroadcastInput(ctx context.Context, userID int6
 
 		if err := h.bot.Messages.Send(bgCtx, resp); err != nil {
 			h.logger.Error("Failed to send broadcast result", "error", err)
+		} else {
+			h.logger.Info("✅ DEBUG [broadcast.go]: Broadcast result sent", "user_id", userID, "success", success, "failed", failed)
 		}
 	}()
 }

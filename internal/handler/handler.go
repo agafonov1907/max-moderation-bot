@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"max-moderation-bot/internal/broadcast"
 	"max-moderation-bot/internal/config"
@@ -94,5 +95,62 @@ func (h *Handler) HandleUpdate(ctx context.Context, upd schemes.UpdateInterface)
 		h.handleBotStarted(ctx, u)
 	default:
 		h.logger.Debug("Received unhandled update type", "type", fmt.Sprintf("%T", u))
+	}
+}
+
+// ============================================================================
+// ДОБАВИТЬ В КОНЕЦ ФАЙЛА: internal/handler/handler.go
+// ============================================================================
+
+// handleBroadcastInputIfWaiting — вспомогательная функция для обработки текста рассылки
+// (если пользователь ввел текст во время ожидания ввода для рассылки)
+func (h *Handler) handleBroadcastInputIfWaiting(ctx context.Context, upd *schemes.MessageCreatedUpdate) {
+	userID := upd.Message.Sender.UserId
+
+	// 🔍 ОТЛАДОЧНЫЙ ЛОГ #1: Проверяем, вызвалась ли функция
+	h.logger.Info("🔍 DEBUG [handler.go]: handleBroadcastInputIfWaiting START",
+		"user_id", userID,
+		"text_len", len(upd.Message.Body.Text),
+	)
+
+	// Проверяем состояние пользователя
+	state, err := h.userStateRepo.GetState(userID)
+
+	// 🔍 ОТЛАДОЧНЫЙ ЛОГ #2: Что в состоянии пользователя?
+	h.logger.Info("🔍 DEBUG [handler.go]: UserState check",
+		"user_id", userID,
+		"state_exists", state != nil,
+		"state_action", func() string {
+			if state != nil {
+				return state.Action
+			}
+			return "nil"
+		}(),
+		"state_metadata", func() string {
+			if state != nil {
+				return state.Metadata
+			}
+			return "nil"
+		}(),
+		"error", err,
+	)
+
+	if err != nil || state == nil {
+		h.logger.Warn("⚠️ No state found, skipping broadcast input", "user_id", userID)
+		return // Не ждем ввода
+	}
+
+	// 🔍 ОТЛАДОЧНЫЙ ЛОГ #3: Проверяем, подходит ли действие
+	h.logger.Info("🔍 DEBUG [handler.go]: Checking action prefix",
+		"action", state.Action,
+		"prefix_match", strings.HasPrefix(state.Action, "broadcast_wait_text"),
+	)
+
+	// Если ждем текст для рассылки — передаем в обработчик
+	if strings.HasPrefix(state.Action, "broadcast_wait_text") {
+		h.logger.Info("✅ DEBUG [handler.go]: Calling ProcessBroadcastInput", "user_id", userID)
+		h.callbackHandler.ProcessBroadcastInput(ctx, userID, upd.Message.Body.Text)
+	} else {
+		h.logger.Warn("⚠️ DEBUG [handler.go]: Action does not match broadcast_wait_text", "action", state.Action)
 	}
 }

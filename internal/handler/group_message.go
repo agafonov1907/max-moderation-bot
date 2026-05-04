@@ -21,6 +21,7 @@ func (h *Handler) handleGroupMessage(ctx context.Context, upd *schemes.MessageCr
 		h.handleMuteCommand(ctx, upd)
 		return
 	}
+
 	var attachmentTypes []string
 	if len(upd.Message.Body.RawAttachments) > 0 {
 		for _, raw := range upd.Message.Body.RawAttachments {
@@ -34,22 +35,30 @@ func (h *Handler) handleGroupMessage(ctx context.Context, upd *schemes.MessageCr
 			}
 		}
 	}
+
 	h.logger.Info("Received group message",
 		"text", upd.Message.Body.Text,
 		"sender", upd.Message.Sender.UserId,
 		"attachment_types", attachmentTypes,
 		"chat_id", upd.Message.Recipient.ChatId,
 	)
+
+	// 🔥 ПРАВКА: нормализуем текст к нижнему регистру для регистронезависимой проверки
+	// Это гарантирует, что "Бомба", "БОМБА", "бОмБа" будут ловиться как "бомба"
+	normalizedText := strings.ToLower(upd.Message.Body.Text)
+
 	payload := pipeline.Payload{
 		ChatID:          upd.Message.Recipient.ChatId,
 		SenderID:        upd.Message.Sender.UserId,
-		Text:            upd.Message.Body.Text,
+		Text:            normalizedText, // ✅ Используем нормализованный текст
 		AttachmentTypes: attachmentTypes,
 	}
+
 	res, err := h.svc.ModerateMessage(ctx, payload)
 	if err != nil {
 		h.logger.Error("Failed to moderate message", "error", err)
 	}
+
 	if res != nil && !res.IsAllowed {
 		h.logger.Info("Message blocked", "reason", res.Reason, "filter", res.FilterName)
 
@@ -79,13 +88,13 @@ func (h *Handler) handleGroupMessage(ctx context.Context, upd *schemes.MessageCr
 				h.sendWarningWithMention(context.Background(), upd.Message.Recipient.ChatId, upd.Message.Sender, res.Reason)
 			}
 		}()
+
 		go func() {
 			bgCtx := context.Background()
 
 			if res.ShouldDelete {
 				h.logger.Info("Deleting message as requested by filter", "mid", upd.Message.Body.Mid, "filter", res.FilterName)
 				_ = h.deleteMessage(bgCtx, upd.Message.Body.Mid, res.FilterName)
-
 				return
 			}
 
@@ -97,7 +106,6 @@ func (h *Handler) handleGroupMessage(ctx context.Context, upd *schemes.MessageCr
 				if settings.EnableAutoDelete {
 					h.logger.Info("Attempting to delete message", "message_id", upd.Message.Body.Mid)
 					_ = h.deleteMessage(bgCtx, upd.Message.Body.Mid, res.FilterName)
-
 				} else {
 					h.logger.Info("Auto-delete is disabled for this chat")
 				}
@@ -105,6 +113,7 @@ func (h *Handler) handleGroupMessage(ctx context.Context, upd *schemes.MessageCr
 		}()
 		return
 	}
+
 	h.logger.Debug("Message allowed")
 }
 func (h *Handler) handleLinkCommand(ctx context.Context, upd *schemes.MessageCreatedUpdate) {

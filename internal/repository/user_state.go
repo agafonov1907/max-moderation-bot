@@ -34,7 +34,10 @@ func (r *PostgresUserStateRepository) SetState(userID, chatID int64, action stri
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	err := r.db.Save(&state).Error
+
+	// ✅ Save делает INSERT если записи нет, или UPDATE если есть (upsert)
+	// Явно указываем таблицу, чтобы избежать проблем с plural/singular
+	err := r.db.Table("user_state").Save(&state).Error
 	if err != nil {
 		return fmt.Errorf("failed to set user state: %w", err)
 	}
@@ -52,7 +55,8 @@ func (r *PostgresUserStateRepository) SetStateWithMetadata(userID, chatID int64,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	err := r.db.Save(&state).Error
+
+	err := r.db.Table("user_state").Save(&state).Error
 	if err != nil {
 		return fmt.Errorf("failed to set user state with metadata: %w", err)
 	}
@@ -62,7 +66,7 @@ func (r *PostgresUserStateRepository) SetStateWithMetadata(userID, chatID int64,
 // GetState получает текущее состояние пользователя
 func (r *PostgresUserStateRepository) GetState(userID int64) (*UserState, error) {
 	var state UserState
-	err := r.db.Where("user_id = ?", userID).First(&state).Error
+	err := r.db.Table("user_state").Where("user_id = ?", userID).First(&state).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -74,7 +78,8 @@ func (r *PostgresUserStateRepository) GetState(userID int64) (*UserState, error)
 
 // ClearState удаляет состояние пользователя
 func (r *PostgresUserStateRepository) ClearState(userID int64) error {
-	if err := r.db.Where("user_id = ?", userID).Delete(&UserState{}).Error; err != nil {
+	err := r.db.Table("user_state").Where("user_id = ?", userID).Delete(&UserState{}).Error
+	if err != nil {
 		return fmt.Errorf("failed to clear user state: %w", err)
 	}
 	return nil

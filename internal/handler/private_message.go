@@ -360,7 +360,7 @@ func (h *Handler) handleUserInput(ctx context.Context, text string, userID int64
 	for _, item := range rawItems {
 		trimmed := strings.TrimSpace(item)
 		if trimmed != "" {
-			items = append(items, trimmed)
+			items = append(items, strings.ToLower(trimmed))
 		}
 	}
 
@@ -610,7 +610,7 @@ func parseWordsFile(scanner *bufio.Scanner) ([]string, int, error) {
 			skippedCount++
 			continue
 		}
-		words = append(words, line)
+		words = append(words, strings.ToLower(line))
 	}
 
 	if err := scanner.Err(); err != nil {

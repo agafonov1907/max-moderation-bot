@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"max-moderation-bot/internal/messages"
 	"max-moderation-bot/internal/metrics"
+	"os"
 	"strings"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
@@ -120,24 +121,46 @@ func (h *CallbackHandler) handleToggleSetting(ctx context.Context, payload strin
 }
 
 func (h *CallbackHandler) handlePromptInput(ctx context.Context, payload string, userID int64, action string) {
+	// 🔥 ЯДЕРНЫЙ ЛОГ #1: функция вызвана
+	fmt.Printf("### handlePromptInput_START: user=%d action=%s payload=%s\n", userID, action, payload)
+	os.Stdout.Sync()
+
 	parts := strings.Split(payload, "_")
 	if len(parts) < 3 {
+		fmt.Printf("### handlePromptInput_FAIL: parts < 3, payload=%s\n", payload)
+		os.Stdout.Sync()
 		return
 	}
 	var chatID int64
 	if _, err := fmt.Sscanf(parts[len(parts)-1], "%d", &chatID); err != nil {
+		fmt.Printf("### handlePromptInput_SSCANF_FAIL: payload=%s err=%v\n", payload, err)
+		os.Stdout.Sync()
 		h.logger.Error("Invalid chat ID in prompt", "payload", payload)
 		return
 	}
 
+	fmt.Printf("### handlePromptInput_PARSED: chatID=%d\n", chatID)
+	os.Stdout.Sync()
+
 	if !h.verifyAccess(ctx, userID, chatID) {
+		fmt.Printf("### handlePromptInput_ACCESS_DENIED: user=%d chat=%d\n", userID, chatID)
+		os.Stdout.Sync()
 		h.logger.Warn("Access denied for prompt", "user_id", userID, "chat_id", chatID)
 		return
 	}
 
+	fmt.Printf("### BEFORE_SetState: user=%d chat=%d action=%s\n", userID, chatID, action)
+	os.Stdout.Sync()
+
 	if err := h.userStateRepo.SetState(userID, chatID, action); err != nil {
+		fmt.Printf("### SETSTATE_ERROR: user=%d chat=%d action=%s err=%v\n", userID, chatID, action, err)
+		os.Stdout.Sync()
 		h.logger.Error("Failed to set user state", "error", err)
+	} else {
+		fmt.Printf("### SETSTATE_OK: user=%d chat=%d action=%s\n", userID, chatID, action)
+		os.Stdout.Sync()
 	}
+
 	label := fmt.Sprintf("%d", chatID)
 	if chat, err := h.bot.Chats.GetChat(ctx, chatID); err == nil && chat.Title != "" {
 		label = chat.Title
@@ -172,8 +195,16 @@ func (h *CallbackHandler) handlePromptInput(ctx context.Context, payload string,
 	kb.AddRow().AddCallback(messages.BtnBack, schemes.DEFAULT, fmt.Sprintf("manage_%d", chatID))
 	msg.AddKeyboard(kb)
 
+	fmt.Printf("### BEFORE_SendMessage: user=%d chat=%d action=%s\n", userID, chatID, action)
+	os.Stdout.Sync()
+
 	if err := h.bot.Messages.Send(ctx, msg); err != nil {
+		fmt.Printf("### SEND_MESSAGE_ERROR: user=%d err=%v\n", userID, err)
+		os.Stdout.Sync()
 		h.logger.Error("Failed to send prompt message", "error", err)
+	} else {
+		fmt.Printf("### SEND_MESSAGE_OK: user=%d action=%s\n", userID, action)
+		os.Stdout.Sync()
 	}
 }
 

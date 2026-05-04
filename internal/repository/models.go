@@ -31,6 +31,11 @@ type UserState struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
+// 🔥 КРИТИЧНО: Горм по умолчанию делает "user_states". Фиксируем "user_state":
+func (UserState) TableName() string {
+	return "user_state"
+}
+
 type Mute struct {
 	ChatID    int64     `gorm:"primaryKey" json:"chat_id"`
 	UserID    int64     `gorm:"primaryKey" json:"user_id"`

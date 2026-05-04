@@ -10,11 +10,17 @@ import (
 
 // ChatMemberCache — модель кэша участников
 type ChatMemberCache struct {
-	ChatID      int64     `json:"chat_id"`
-	MemberCount int       `json:"member_count"`
-	LastUpdated time.Time `json:"last_updated"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int64     `gorm:"primaryKey" json:"id"`
+	ChatID      int64     `gorm:"not null" json:"chat_id"` // ← uniqueIndex убран! Уникальность уже есть в БД (uniq_chat_id)
+	MemberCount int       `gorm:"default:0" json:"member_count"`
+	LastUpdated time.Time `gorm:"default:now()" json:"last_updated"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// 🔥 КРИТИЧНО: фиксируем имя таблицы для GORM (если будет использоваться)
+func (ChatMemberCache) TableName() string {
+	return "chat_member_caches" // ← с "s", как в БД
 }
 
 // ChatActivity — модель активности чата по дням
@@ -28,8 +34,9 @@ type ChatActivity struct {
 
 // UpdateMemberCache обновляет кэш количества участников
 func (r *PostgresRepository) UpdateMemberCache(ctx context.Context, chatID int64, memberCount int) error {
+	// ✅ ИСПРАВЛЕНО: chat_member_cache → chat_member_caches
 	query := `
-		INSERT INTO chat_member_cache (chat_id, member_count, last_updated, updated_at)
+		INSERT INTO chat_member_caches (chat_id, member_count, last_updated, updated_at)
 		VALUES ($1, $2, NOW(), NOW())
 		ON CONFLICT (chat_id) 
 		DO UPDATE SET 
@@ -43,8 +50,9 @@ func (r *PostgresRepository) UpdateMemberCache(ctx context.Context, chatID int64
 
 // GetMemberCache получает кэш количества участников
 func (r *PostgresRepository) GetMemberCache(ctx context.Context, chatID int64) (*ChatMemberCache, error) {
+	// ✅ ИСПРАВЛЕНО: chat_member_cache → chat_member_caches
 	query := `SELECT chat_id, member_count, last_updated, created_at, updated_at 
-			  FROM chat_member_cache WHERE chat_id = $1`
+			  FROM chat_member_caches WHERE chat_id = $1`
 
 	var cache ChatMemberCache
 	err := r.db.QueryRowContext(ctx, query, chatID).Scan(
@@ -67,7 +75,8 @@ func (r *PostgresRepository) GetAllMemberCache(ctx context.Context, chatIDs []in
 		return result, nil
 	}
 
-	query := `SELECT chat_id, member_count, last_updated FROM chat_member_cache WHERE chat_id = ANY($1)`
+	// ✅ ИСПРАВЛЕНО: chat_member_cache → chat_member_caches
+	query := `SELECT chat_id, member_count, last_updated FROM chat_member_caches WHERE chat_id = ANY($1)`
 
 	rows, err := r.db.QueryContext(ctx, query, pq.Array(chatIDs))
 	if err != nil {
@@ -92,7 +101,8 @@ func (r *PostgresRepository) GetLastCacheUpdate(ctx context.Context, chatIDs []i
 		return time.Time{}, nil
 	}
 
-	query := `SELECT MAX(last_updated) FROM chat_member_cache WHERE chat_id = ANY($1)`
+	// ✅ ИСПРАВЛЕНО: chat_member_cache → chat_member_caches
+	query := `SELECT MAX(last_updated) FROM chat_member_caches WHERE chat_id = ANY($1)`
 
 	var lastUpdated sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, pq.Array(chatIDs)).Scan(&lastUpdated)
@@ -108,6 +118,7 @@ func (r *PostgresRepository) GetLastCacheUpdate(ctx context.Context, chatIDs []i
 }
 
 // GetChatActivity получает активность чата за день
+// ⚠️ Эта функция использует таблицу chat_activity (другая таблица, не трогаем)
 func (r *PostgresRepository) GetChatActivity(ctx context.Context, chatID int64, date string) (*ChatActivity, error) {
 	query := `SELECT chat_id, date, messages_count, created_at, updated_at 
 			  FROM chat_activity WHERE chat_id = $1 AND date = $2`

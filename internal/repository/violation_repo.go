@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	"fmt"
 	"log/slog"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ViolationRepository interface {
@@ -64,18 +66,49 @@ func (r *PostgresViolationRepository) IncrementChatStat(ctx context.Context, cha
 	}).Error
 }
 
+// GetChatTotalStats возвращает суммарную статистику по чату (все дни)
 func (r *PostgresViolationRepository) GetChatTotalStats(ctx context.Context, chatID int64) (*ChatStats, error) {
-	var stats ChatStats
-	err := r.db.WithContext(ctx).Model(&ChatStats{}).
-		Select("chat_id, SUM(word_violations) as word_violations, SUM(link_violations) as link_violations, SUM(image_violations) as image_violations, SUM(video_violations) as video_violations, SUM(audio_violations) as audio_violations, SUM(file_violations) as file_violations, SUM(mute_count) as mute_count").
-		Where("chat_id = ?", chatID).
-		Group("chat_id").
-		First(&stats).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return &ChatStats{ChatID: chatID}, nil
-		}
-		return nil, err
+	// ✅ Анонимная структура ТОЛЬКО для агрегированных полей
+	// Это предотвращает добавление лишних колонок (date, created_at) в SELECT
+	var result struct {
+		WordViolations  int64 `gorm:"column:word_violations"`
+		LinkViolations  int64 `gorm:"column:link_violations"`
+		ImageViolations int64 `gorm:"column:image_violations"`
+		VideoViolations int64 `gorm:"column:video_violations"`
+		AudioViolations int64 `gorm:"column:audio_violations"`
+		FileViolations  int64 `gorm:"column:file_violations"`
+		MuteCount       int64 `gorm:"column:mute_count"`
 	}
-	return &stats, nil
+
+	err := r.db.WithContext(ctx).
+		Table("chat_stats").
+		Select(`
+			COALESCE(SUM(word_violations), 0) as word_violations,
+			COALESCE(SUM(link_violations), 0) as link_violations,
+			COALESCE(SUM(image_violations), 0) as image_violations,
+			COALESCE(SUM(video_violations), 0) as video_violations,
+			COALESCE(SUM(audio_violations), 0) as audio_violations,
+			COALESCE(SUM(file_violations), 0) as file_violations,
+			COALESCE(SUM(mute_count), 0) as mute_count
+		`).
+		Where("chat_id = ?", chatID).
+		// ✅ Нет GROUP BY: SUM() без GROUP BY агрегирует все строки с chat_id=? в одну
+		Scan(&result).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat total stats: %w", err)
+	}
+
+	// ✅ Собираем итоговый ChatStats вручную
+	return &ChatStats{
+		ChatID:          chatID,
+		WordViolations:  result.WordViolations,
+		LinkViolations:  result.LinkViolations,
+		ImageViolations: result.ImageViolations,
+		VideoViolations: result.VideoViolations,
+		AudioViolations: result.AudioViolations,
+		FileViolations:  result.FileViolations,
+		MuteCount:       result.MuteCount,
+		// Date, CreatedAt, UpdatedAt остаются нулевыми — это нормально для "итоговой" статистики
+	}, nil
 }

@@ -40,7 +40,7 @@ func NewPostgresDB(dsn string) (*gorm.DB, error) {
 		&UserState{},
 		&UserViolation{},
 		&ChatStats{},
-		&ChatMemberCache{}, // ✅ НОВАЯ СТРОКА: миграция таблицы кэша
+		//&ChatMemberCache{}, // ✅ НОВАЯ СТРОКА: миграция таблицы кэша
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}

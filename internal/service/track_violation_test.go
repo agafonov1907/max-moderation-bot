@@ -84,7 +84,7 @@ func TestModerationService_TrackViolation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			violationRepo := tt.setupMocks()
-			svc := NewModerationService(logger, nil, nil, nil, nil, nil, violationRepo, nil)
+			svc := NewModerationService(logger, nil, nil, nil, nil, nil, violationRepo, nil, nil, nil)
 
 			mute, _, err := svc.TrackViolation(context.Background(), tt.chatID, tt.userID, tt.violationType)
 

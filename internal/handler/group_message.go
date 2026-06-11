@@ -133,15 +133,15 @@ func (h *Handler) handleLinkCommand(ctx context.Context, upd *schemes.MessageCre
 		return
 	}
 
-	isOwner, err := h.svc.IsChatOwner(ctx, upd.Message.Recipient.ChatId, upd.Message.Sender.UserId)
+	isAdmin, err := h.svc.IsChatAdmin(ctx, upd.Message.Recipient.ChatId, upd.Message.Sender.UserId)
 	if err != nil {
-		h.logger.Error("Failed to check owner status for link", "error", err)
-		h.SendAutoDeleteMessage(ctx, upd.Message.Recipient.ChatId, fmt.Sprintf(messages.MsgLinkGroupFail, "could not verify owner status"))
+		h.logger.Error("Failed to check admin status for link", "error", err)
+		h.SendAutoDeleteMessage(ctx, upd.Message.Recipient.ChatId, fmt.Sprintf(messages.MsgLinkGroupFail, "could not verify admin status"))
 		return
 	}
-	if !isOwner {
-		h.logger.Info("Non-owner user tried to link group", "user_id", upd.Message.Sender.UserId)
-		h.SendAutoDeleteMessage(ctx, upd.Message.Recipient.ChatId, messages.MsgLinkUserNotOwner)
+	if !isAdmin {
+		h.logger.Info("Unauthorized user tried to link group", "user_id", upd.Message.Sender.UserId)
+		h.SendAutoDeleteMessage(ctx, upd.Message.Recipient.ChatId, messages.MsgLinkUserNotOwner) // можно уточнить текст
 		return
 	}
 

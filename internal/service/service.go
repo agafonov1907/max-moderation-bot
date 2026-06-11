@@ -379,7 +379,6 @@ func (s *ModerationService) GetChatStats(ctx context.Context, chatID int64) (*re
 	return s.violationRepo.GetChatTotalStats(ctx, chatID)
 }
 
-// ✅ ИСПРАВЛЕНО: используем ParticipantsCount из schemes.Chat
 func (s *ModerationService) UpdateMemberCache(ctx context.Context, userID int64) error {
 	if s.statsRepo == nil {
 		return fmt.Errorf("statsRepo not initialized")
@@ -397,7 +396,6 @@ func (s *ModerationService) UpdateMemberCache(ctx context.Context, userID int64)
 		if s.bot != nil {
 			chatInfo, err := s.bot.Chats.GetChat(ctx, chatID)
 			if err == nil && chatInfo != nil {
-				// ✅ ИСПРАВЛЕНО: ParticipantsCount вместо MemberCount
 				memberCount = chatInfo.ParticipantsCount
 				s.logger.Debug("Got member count from API", "chat_id", chatID, "members", memberCount)
 			}
@@ -416,22 +414,7 @@ func (s *ModerationService) UpdateMemberCache(ctx context.Context, userID int64)
 	return nil
 }
 
-func (s *ModerationService) IsChatAdmin(ctx context.Context, chatID, userID int64) (bool, error) {
-	if s.bot == nil {
-		return false, fmt.Errorf("bot client not initialized")
-	}
-	adminList, err := s.bot.Chats.GetChatAdmins(ctx, chatID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get chat admins: %w", err)
-	}
-	for _, member := range adminList.Members {
-		if member.UserId == userID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
+// IsChatOwner проверяет, является ли пользователь владельцем чата
 func (s *ModerationService) IsChatOwner(ctx context.Context, chatID, userID int64) (bool, error) {
 	if s.bot == nil {
 		return false, fmt.Errorf("bot client not initialized")
@@ -445,5 +428,28 @@ func (s *ModerationService) IsChatOwner(ctx context.Context, chatID, userID int6
 			return true, nil
 		}
 	}
+	return false, nil
+}
+
+// IsChatAdmin проверяет, является ли пользователь владельцем ИЛИ администратором чата
+// ✅ ОПТИМИЗИРОВАНО: делает ОДИН запрос к API вместо двух
+func (s *ModerationService) IsChatAdmin(ctx context.Context, chatID, userID int64) (bool, error) {
+	if s.bot == nil {
+		return false, fmt.Errorf("bot client not initialized")
+	}
+
+	// Делаем ОДИН запрос к API MAX
+	adminList, err := s.bot.Chats.GetChatAdmins(ctx, chatID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get chat admins: %w", err)
+	}
+
+	// Проверяем, есть ли пользователь в списке админов (владелец или админ)
+	for _, member := range adminList.Members {
+		if member.UserId == userID {
+			return true, nil
+		}
+	}
+
 	return false, nil
 }
